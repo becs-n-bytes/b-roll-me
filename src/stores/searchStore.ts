@@ -89,22 +89,25 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
       for (const result of saved) {
         if (result.captions_available === 1) {
-          const segments = await fetchTranscript(result.video_id);
-          if (segments) {
-            const matches = queries.flatMap((q) => searchTranscript(segments, q));
-            if (matches.length > 0) {
-              const uniqueMatches = matches.filter(
-                (m, i, arr) => arr.findIndex((a) => Math.abs(a.startTime - m.startTime) < 3) === i
-              ).slice(0, 5);
+          try {
+            const segments = await fetchTranscript(result.video_id);
+            if (segments) {
+              const matches = queries.flatMap((q) => searchTranscript(segments, q));
+              if (matches.length > 0) {
+                const uniqueMatches = matches.filter(
+                  (m, i, arr) => arr.findIndex((a) => Math.abs(a.startTime - m.startTime) < 3) === i
+                ).slice(0, 5);
 
-              const db = await getDb();
-              const matchesJson = JSON.stringify(uniqueMatches);
-              await db.execute(
-                "UPDATE search_results SET transcript_matches_json = $1 WHERE id = $2",
-                [matchesJson, result.id]
-              );
-              result.transcript_matches_json = matchesJson;
+                const db = await getDb();
+                const matchesJson = JSON.stringify(uniqueMatches);
+                await db.execute(
+                  "UPDATE search_results SET transcript_matches_json = $1 WHERE id = $2",
+                  [matchesJson, result.id]
+                );
+                result.transcript_matches_json = matchesJson;
+              }
             }
+          } catch {
           }
         }
       }

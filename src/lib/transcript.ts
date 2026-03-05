@@ -23,8 +23,11 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
     return JSON.parse(cached[0].transcript_json);
   }
 
-  const url = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`;
-  const response = await fetch(url);
+  const url = new URL("https://www.youtube.com/api/timedtext");
+  url.searchParams.set("v", videoId);
+  url.searchParams.set("lang", "en");
+  url.searchParams.set("fmt", "json3");
+  const response = await fetch(url.toString());
 
   if (!response.ok) return null;
 
