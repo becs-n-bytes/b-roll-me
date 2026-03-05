@@ -1,0 +1,22 @@
+[package]
+name = "ai-broll"
+version = "0.1.0"
+description = "AI-powered B-Roll finder for video editors"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "ai_broll_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-sql = { version = "2.3.2", features = ["sqlite"] }
+tauri-plugin-http = "2.5.7"
+tauri-plugin-shell = "2.3.5"
