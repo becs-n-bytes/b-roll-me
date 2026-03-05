@@ -3,6 +3,7 @@ import { BROLL_SYSTEM_PROMPT } from "./prompts";
 import type { BRollMoment, LlmModel } from "../types";
 import { getSettingFromDb } from "../stores/settingsStore";
 import { parseModelValue } from "./models";
+import { streamAnthropic, streamOpenAiCompatible, streamGemini } from "./streaming";
 
 interface AnthropicResponse {
   content: { type: string; text: string }[];
@@ -43,7 +44,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: 16384,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -83,7 +84,7 @@ async function callOpenAiCompatible(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 4096,
+      max_tokens: 16384,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
@@ -121,7 +122,7 @@ async function callGemini(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
-        generationConfig: { maxOutputTokens: 4096 },
+        generationConfig: { maxOutputTokens: 16384 },
       }),
     },
   );
@@ -150,7 +151,8 @@ export async function callLlm(
   systemPrompt: string,
   userMessage: string,
   apiKey: string,
-  model?: LlmModel
+  model?: LlmModel,
+  onChunk?: (text: string) => void,
 ): Promise<string> {
   const selectedModel = model ?? await getSettingFromDb("llm_model");
   const { provider, modelId } = parseModelValue(selectedModel);
@@ -158,6 +160,7 @@ export async function callLlm(
   switch (provider) {
     case "openai": {
       const key = await getSettingFromDb("openai_api_key") || apiKey;
+      if (onChunk) return streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenAI", onChunk);
       return callOpenAiCompatible(
         "https://api.openai.com/v1/chat/completions",
         key, modelId, systemPrompt, userMessage, "OpenAI",
@@ -165,6 +168,7 @@ export async function callLlm(
     }
     case "openrouter": {
       const key = await getSettingFromDb("openrouter_api_key");
+      if (onChunk) return streamOpenAiCompatible("https://openrouter.ai/api/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenRouter", onChunk);
       return callOpenAiCompatible(
         "https://openrouter.ai/api/v1/chat/completions",
         key, modelId, systemPrompt, userMessage, "OpenRouter",
@@ -172,34 +176,51 @@ export async function callLlm(
     }
     case "gemini": {
       const key = await getSettingFromDb("gemini_api_key");
+      if (onChunk) return streamGemini(key, modelId, systemPrompt, userMessage, onChunk);
       return callGemini(key, modelId, systemPrompt, userMessage);
     }
-    default:
-      return callAnthropic(apiKey, modelId, systemPrompt, userMessage);
+    default: {
+      const key = await getSettingFromDb("anthropic_api_key") || apiKey;
+      if (onChunk) return streamAnthropic(key, modelId, systemPrompt, userMessage, onChunk);
+      return callAnthropic(key, modelId, systemPrompt, userMessage);
+    }
   }
 }
 
 export async function analyzeScript(
   scriptText: string,
   apiKey: string,
-  model?: LlmModel
+  model?: LlmModel,
+  onChunk?: (text: string) => void,
 ): Promise<BRollMoment[]> {
+  const maxMoments = Number(await getSettingFromDb("max_moments_per_analysis")) || 10;
+  const systemPrompt = `${BROLL_SYSTEM_PROMPT}\n\nIdentify at most ${maxMoments} moments. Prioritize the most impactful B-Roll opportunities.`;
+
   const text = await callLlm(
-    BROLL_SYSTEM_PROMPT,
+    systemPrompt,
     `Analyze this script for B-Roll opportunities:\n\n${scriptText}`,
     apiKey,
     model,
+    onChunk,
   );
 
   const jsonStr = extractJson(text);
-  const parsed = JSON.parse(jsonStr) as { moments: Omit<BRollMoment, "id">[] };
 
-  if (!parsed.moments || !Array.isArray(parsed.moments)) {
-    throw new Error("Invalid response format: missing moments array");
+  try {
+    const parsed = JSON.parse(jsonStr) as { moments: Omit<BRollMoment, "id">[] };
+
+    if (!parsed.moments || !Array.isArray(parsed.moments)) {
+      throw new Error("Invalid response format: missing moments array");
+    }
+
+    return parsed.moments.map((m) => ({
+      ...m,
+      id: crypto.randomUUID(),
+    }));
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("LLM response was cut short. Try a shorter script or reduce max moments in Settings.");
+    }
+    throw err;
   }
-
-  return parsed.moments.map((m) => ({
-    ...m,
-    id: crypto.randomUUID(),
-  }));
 }

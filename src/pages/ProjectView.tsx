@@ -325,7 +325,7 @@ function MomentCard({
   evaluations,
   isEvaluating,
   sortByEvaluation,
-  hasAnthropicKey,
+  hasLlmKey,
   onSearch,
   onCustomSearch,
   onDownload,
@@ -341,7 +341,7 @@ function MomentCard({
   evaluations: EvaluatedClip[];
   isEvaluating: boolean;
   sortByEvaluation: boolean;
-  hasAnthropicKey: boolean;
+  hasLlmKey: boolean;
   onSearch: (queries: string[]) => void;
   onCustomSearch: (query: string) => void;
   onDownload: (result: SearchResult, start: number, end: number) => void;
@@ -436,7 +436,7 @@ function MomentCard({
                 </button>
                 <button
                   onClick={onEvaluate}
-                  disabled={!hasAnthropicKey || isEvaluating || searchResults.length === 0}
+                  disabled={!hasLlmKey || isEvaluating || searchResults.length === 0}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white transition-colors"
                   title={`Evaluate ${searchResults.length} results (~${estimateEvaluationTokens(searchResults.length)} tokens)`}
                 >
@@ -608,6 +608,9 @@ export default function ProjectView() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [streamText, setStreamText] = useState("");
+  const [streamExpanded, setStreamExpanded] = useState(true);
+  const streamRef = useRef<HTMLPreElement>(null);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [hasYouTubeKey, setHasYouTubeKey] = useState(false);
   const [youtubeApiKey, setYoutubeApiKey] = useState("");
@@ -644,8 +647,8 @@ export default function ProjectView() {
   useEffect(() => {
     (async () => {
       const db = await getDb();
-      const anthropicRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
-      setHasApiKey(anthropicRows.length > 0 && anthropicRows[0].value.length > 0);
+      const modelRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["llm_model"]);
+      setHasApiKey(modelRows.length > 0 && modelRows[0].value.length > 0);
       const ytRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["youtube_api_key"]);
       if (ytRows.length > 0 && ytRows[0].value.length > 0) {
         setHasYouTubeKey(true);
@@ -685,6 +688,12 @@ export default function ProjectView() {
     }
   }, [scriptText, moments.length]);
 
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    }
+  }, [streamText]);
+
   const saveScript = useCallback(
     async (text: string) => {
       if (!id) return;
@@ -716,17 +725,18 @@ export default function ProjectView() {
     if (!id || !scriptText.trim()) return;
     setAnalyzing(true);
     setAnalysisError(null);
+    setStreamText("");
     setElapsedSeconds(0);
     elapsedRef.current = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
     try {
-      const db = await getDb();
-      const rows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
-      if (!rows.length || !rows[0].value) throw new Error("No API key configured. Add your Anthropic key in Settings.");
       const analysisModel = await getSettingFromDb("analysis_model_override") || undefined;
-      const brollMoments = await analyzeScript(scriptText, rows[0].value, analysisModel);
+      const brollMoments = await analyzeScript(scriptText, "", analysisModel, (chunk) => {
+        setStreamText((prev) => prev + chunk);
+      });
       await saveMoments(id, brollMoments);
       analysisScriptRef.current = scriptText;
       setScriptChangedSinceAnalysis(false);
+      setStreamText("");
     } catch (err) {
       setAnalysisError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -779,16 +789,13 @@ export default function ProjectView() {
   };
 
   const handleEvaluateMoment = async (momentId: string) => {
-    const db = await getDb();
-    const rows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
-    if (!rows.length || !rows[0].value) return;
     const moment = moments.find((m) => m.id === momentId);
     if (!moment) return;
     const results = searchResults.get(momentId);
     if (!results || results.length === 0) return;
     const suggestions: BRollSuggestion[] = moment.suggestions_json ? JSON.parse(moment.suggestions_json) : [];
     const evalModel = await getSettingFromDb("evaluation_model_override") || undefined;
-    await evaluateMoment(momentId, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, rows[0].value, evalModel);
+    await evaluateMoment(momentId, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, "", evalModel);
   };
 
   const handlePreview = (result: SearchResult, momentId: string, momentIndex: number) => {
@@ -800,14 +807,11 @@ export default function ProjectView() {
   const handleEvaluateAll = async () => {
     if (!hasApiKey) return;
     setEvaluatingAll(true);
-    const db = await getDb();
-    const rows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
-    if (!rows.length || !rows[0].value) { setEvaluatingAll(false); return; }
     for (const moment of moments) {
       const results = searchResults.get(moment.id);
       if (!results || results.length === 0) continue;
       const suggestions: BRollSuggestion[] = moment.suggestions_json ? JSON.parse(moment.suggestions_json) : [];
-      await evaluateMoment(moment.id, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, rows[0].value);
+      await evaluateMoment(moment.id, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, "");
     }
     setEvaluatingAll(false);
   };
@@ -817,15 +821,12 @@ export default function ProjectView() {
     pipelineCancelledRef.current = false;
 
     const db = await getDb();
-    const apiRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
-    if (!apiRows.length || !apiRows[0].value) return;
-    const apiKey = apiRows[0].value;
 
     try {
       setPipelineStep("analyzing");
       setPipelineProgress({ current: 0, total: 1, detail: "Analyzing script..." });
       const pipelineAnalysisModel = await getSettingFromDb("analysis_model_override") || undefined;
-      const brollMoments = await analyzeScript(scriptText, apiKey, pipelineAnalysisModel);
+      const brollMoments = await analyzeScript(scriptText, "", pipelineAnalysisModel);
       await saveMoments(id, brollMoments);
       analysisScriptRef.current = scriptText;
       setScriptChangedSinceAnalysis(false);
@@ -863,7 +864,7 @@ export default function ProjectView() {
         if (!results || results.length === 0) continue;
         setPipelineProgress({ current: i + 1, total: momentsWithResults.length, detail: `Evaluating moment ${i + 1} of ${momentsWithResults.length}...` });
         const suggestions: BRollSuggestion[] = m.suggestions_json ? JSON.parse(m.suggestions_json) : [];
-        await evaluateMoment(m.id, m.script_excerpt, m.editorial_note ?? "", suggestions.map((s) => s.description), results, apiKey, pipelineEvalModel);
+        await evaluateMoment(m.id, m.script_excerpt, m.editorial_note ?? "", suggestions.map((s) => s.description), results, "", pipelineEvalModel);
       }
 
       setPipelineStep("complete");
@@ -1000,7 +1001,24 @@ export default function ProjectView() {
           </div>
         </div>
 
-        {analyzing && <div className="flex items-center gap-3 p-4 bg-neutral-900 border border-neutral-800 rounded-xl"><SpinnerIcon /><span className="text-sm text-neutral-400">Analyzing script... {elapsedSeconds}s</span></div>}
+        {analyzing && (
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+            <div className="flex items-center gap-3 p-4">
+              <SpinnerIcon />
+              <span className="text-sm text-neutral-400">Analyzing script... {elapsedSeconds}s</span>
+              {streamText && (
+                <button onClick={() => setStreamExpanded(!streamExpanded)} className="ml-auto text-xs text-neutral-500 hover:text-neutral-300 transition-colors">
+                  {streamExpanded ? "Hide" : "Show"} output
+                </button>
+              )}
+            </div>
+            {streamExpanded && streamText && (
+              <pre ref={streamRef} className="px-4 pb-4 text-xs text-neutral-500 font-mono max-h-64 overflow-y-auto whitespace-pre-wrap break-all border-t border-neutral-800 pt-3">
+                {streamText}
+              </pre>
+            )}
+          </div>
+        )}
         {pipelineRunning && (
           <div className="p-4 bg-neutral-900 border border-neutral-800 rounded-xl mb-4">
             <div className="flex items-center justify-between mb-2">
@@ -1027,10 +1045,21 @@ export default function ProjectView() {
             <p className="text-sm text-emerald-400">Pipeline complete — script analyzed, clips searched, and results evaluated.</p>
           </div>
         )}
-        {analysisError && <div className="p-4 bg-red-950/30 border border-red-900/50 rounded-xl mb-4"><p className="text-sm text-red-400">{analysisError}</p><button onClick={runAnalysis} disabled={!canAnalyze} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">Retry</button></div>}
+        {analysisError && (
+          <div className="p-4 bg-red-950/30 border border-red-900/50 rounded-xl mb-4">
+            <p className="text-sm text-red-400">{analysisError}</p>
+            <button onClick={runAnalysis} disabled={!canAnalyze} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">Retry</button>
+            {streamText && (
+              <details className="mt-3">
+                <summary className="text-xs text-neutral-500 cursor-pointer hover:text-neutral-400 transition-colors">Show raw LLM output</summary>
+                <pre className="mt-2 text-xs text-neutral-600 font-mono max-h-48 overflow-y-auto whitespace-pre-wrap break-all">{streamText}</pre>
+              </details>
+            )}
+          </div>
+        )}
         {searchError && <div className="p-3 bg-red-950/30 border border-red-900/50 rounded-xl mb-4"><p className="text-sm text-red-400">{searchError}</p></div>}
         {evaluationError && <div className="p-3 bg-red-950/30 border border-red-900/50 rounded-xl mb-4"><p className="text-sm text-red-400">{evaluationError}</p></div>}
-        {!analyzing && moments.length === 0 && !analysisError && <p className="text-sm text-neutral-600">{hasApiKey ? "Click \"Analyze Script\" to find B-Roll opportunities." : "Add your Anthropic API key in Settings to get started."}</p>}
+        {!analyzing && moments.length === 0 && !analysisError && <p className="text-sm text-neutral-600">{hasApiKey ? "Click \"Analyze Script\" to find B-Roll opportunities." : "Select a model and configure an API key in Settings to get started."}</p>}
 
         {moments.length > 0 && (
           <div className="flex flex-col gap-3">
@@ -1045,7 +1074,7 @@ export default function ProjectView() {
                 evaluations={evaluationMap.get(moment.id) ?? []}
                 isEvaluating={evaluatingMoments.has(moment.id)}
                 sortByEvaluation={sortByEvaluation}
-                hasAnthropicKey={hasApiKey}
+                hasLlmKey={hasApiKey}
                 onSearch={(queries) => searchForMoment(moment.id, queries, youtubeApiKey)}
                 onCustomSearch={(query) => searchCustom(moment.id, query, youtubeApiKey)}
                 onDownload={(result, start, end) => handleDownload(moment.id, index, result, start, end)}

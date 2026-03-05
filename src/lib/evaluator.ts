@@ -70,11 +70,19 @@ export async function evaluateClips(
   );
 
   const jsonStr = extractJson(text);
-  const parsed = JSON.parse(jsonStr) as { evaluations: ClipEvaluation[] };
 
-  if (!parsed.evaluations || !Array.isArray(parsed.evaluations)) {
-    throw new Error("Invalid response format: missing evaluations array");
+  try {
+    const parsed = JSON.parse(jsonStr) as { evaluations: ClipEvaluation[] };
+
+    if (!parsed.evaluations || !Array.isArray(parsed.evaluations)) {
+      throw new Error("Invalid response format: missing evaluations array");
+    }
+
+    return parsed.evaluations;
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("LLM response was cut short. Try evaluating fewer clips at once.");
+    }
+    throw err;
   }
-
-  return parsed.evaluations;
 }

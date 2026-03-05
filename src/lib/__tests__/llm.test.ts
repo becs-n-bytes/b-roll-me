@@ -46,7 +46,7 @@ describe("analyzeScript", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.model).toBe("claude-sonnet-4-20250514");
-    expect(body.max_tokens).toBe(4096);
+    expect(body.max_tokens).toBe(16384);
     expect(body.messages[0].role).toBe("user");
     expect(body.messages[0].content).toContain("my script");
     expect(body.system).toBeTruthy();
@@ -213,5 +213,30 @@ describe("analyzeScript", () => {
     });
 
     await expect(analyzeScript("s", "k")).rejects.toThrow("missing moments array");
+  });
+
+  it("includes max moments limit in system prompt", async () => {
+    mockFetch.mockResolvedValue(
+      makeSuccessResponse([
+        { scriptExcerpt: "test", timestampHint: "0:00", editorialNote: "note", suggestions: [] },
+      ]),
+    );
+
+    await analyzeScript("script", "key");
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.system).toContain("at most 10 moments");
+  });
+
+  it("shows user-friendly error on truncated JSON response", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () =>
+        Promise.resolve({
+          content: [{ type: "text", text: '{"moments": [{"scriptExcerpt": "test", "timestampHint": "0:00"}' }],
+        }),
+    });
+
+    await expect(analyzeScript("s", "k")).rejects.toThrow("LLM response was cut short");
   });
 });
