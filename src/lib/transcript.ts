@@ -2,6 +2,21 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { getDb } from "./database";
 import type { TranscriptSegment, TranscriptMatch } from "../types";
 
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+interface CaptionTrack {
+  baseUrl: string;
+  languageCode: string;
+}
+
+interface PlayerResponse {
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: CaptionTrack[];
+    };
+  };
+}
+
 interface TimedTextEvent {
   segs?: { utf8: string }[];
   tStartMs?: number;
@@ -10,6 +25,38 @@ interface TimedTextEvent {
 
 interface TimedTextResponse {
   events?: TimedTextEvent[];
+}
+
+async function getCaptionUrl(videoId: string, lang = "en"): Promise<string | null> {
+  const response = await fetch("https://www.youtube.com/youtubei/v1/player", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": BROWSER_UA,
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: "WEB",
+          clientVersion: "2.20240101.00.00",
+        },
+      },
+      videoId,
+    }),
+  });
+
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as PlayerResponse;
+  const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  if (!tracks?.length) return null;
+
+  const track = tracks.find((t) => t.languageCode === lang) ?? tracks[0];
+  if (!track?.baseUrl) return null;
+
+  return track.baseUrl.includes("fmt=")
+    ? track.baseUrl
+    : `${track.baseUrl}&fmt=json3`;
 }
 
 export async function fetchTranscript(videoId: string): Promise<TranscriptSegment[] | null> {
@@ -23,11 +70,19 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
     return JSON.parse(cached[0].transcript_json);
   }
 
-  const url = new URL("https://www.youtube.com/api/timedtext");
-  url.searchParams.set("v", videoId);
-  url.searchParams.set("lang", "en");
-  url.searchParams.set("fmt", "json3");
-  const response = await fetch(url.toString());
+  const captionUrl = await getCaptionUrl(videoId);
+  if (!captionUrl) return null;
+
+  let safeUrl: string;
+  try {
+    safeUrl = new URL(captionUrl).toString();
+  } catch {
+    return null;
+  }
+
+  const response = await fetch(safeUrl, {
+    headers: { "User-Agent": BROWSER_UA },
+  });
 
   if (!response.ok) return null;
 
