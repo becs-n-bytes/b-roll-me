@@ -1,7 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import Settings from "../Settings";
 import { useSettingsStore, SETTING_DEFAULTS } from "../../stores/settingsStore";
+import type { ModelOption } from "../../lib/models";
+
+const mockFetchAllModels = vi.fn<() => Promise<ModelOption[]>>().mockResolvedValue([]);
+
+vi.mock("../../lib/models", () => ({
+  fetchAllModels: (...args: unknown[]) => mockFetchAllModels(...(args as [])),
+  parseModelValue: (value: string) => {
+    const i = value.indexOf(":");
+    if (i === -1) return { provider: "anthropic", modelId: value };
+    return { provider: value.slice(0, i), modelId: value.slice(i + 1) };
+  },
+  toModelValue: (provider: string, modelId: string) => `${provider}:${modelId}`,
+}));
 
 vi.mock("../../lib/database", () => ({
   getDb: vi.fn().mockResolvedValue({
@@ -13,6 +26,7 @@ vi.mock("../../lib/database", () => ({
 describe("Settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetchAllModels.mockResolvedValue([]);
     useSettingsStore.setState({
       sidebarCollapsed: false,
       settings: { ...SETTING_DEFAULTS },
@@ -100,14 +114,30 @@ describe("Settings", () => {
     expect(screen.getByText("com.aibroll.desktop")).toBeInTheDocument();
   });
 
-  it("shows model options in select", () => {
+  it("shows fallback model when no models fetched", async () => {
     render(<Settings />);
-    expect(screen.getByText("Claude Sonnet 4")).toBeInTheDocument();
-    expect(screen.getByText("Claude Haiku 4 (cheaper)")).toBeInTheDocument();
-    expect(screen.getByText("GPT-4o (requires OpenAI key)")).toBeInTheDocument();
-    expect(screen.getByText("OpenRouter Auto (requires OpenRouter key)")).toBeInTheDocument();
-    expect(screen.getByText("Gemini 2.5 Flash (requires Gemini key)")).toBeInTheDocument();
-    expect(screen.getByText("Gemini 2.5 Pro")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("claude-sonnet-4-20250514")).toBeInTheDocument();
+    });
+  });
+
+  it("shows fetched models grouped by provider", async () => {
+    mockFetchAllModels.mockResolvedValue([
+      { provider: "anthropic", id: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4" },
+      { provider: "openai", id: "gpt-4o", displayName: "gpt-4o" },
+    ]);
+    render(<Settings />);
+    await waitFor(() => {
+      expect(screen.getByText("Claude Sonnet 4")).toBeInTheDocument();
+      expect(screen.getByText("gpt-4o")).toBeInTheDocument();
+    });
+  });
+
+  it("shows Refresh button for model selector", async () => {
+    render(<Settings />);
+    await waitFor(() => {
+      expect(screen.getByText("Refresh")).toBeInTheDocument();
+    });
   });
 
   it("shows format options in select", () => {

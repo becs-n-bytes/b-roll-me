@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { useSettingsStore } from "../stores/settingsStore";
-import type { VideoFormat, Resolution, LlmModel } from "../types";
+import type { VideoFormat, Resolution } from "../types";
+import { fetchAllModels, toModelValue, parseModelValue, type ModelOption, type LlmProvider } from "../lib/models";
 
 type TestStatus = "idle" | "testing" | "success" | "error";
 
@@ -235,14 +236,100 @@ function TextInputField({
   );
 }
 
+const PROVIDER_LABELS: Record<LlmProvider, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  gemini: "Google Gemini",
+};
+
+function ModelSelector({
+  value,
+  models,
+  loading,
+  onRefresh,
+  onChange,
+}: {
+  value: string;
+  models: ModelOption[];
+  loading: boolean;
+  onRefresh: () => void;
+  onChange: (value: string) => void;
+}) {
+  const grouped = models.reduce<Record<string, ModelOption[]>>((acc, m) => {
+    (acc[m.provider] ??= []).push(m);
+    return acc;
+  }, {});
+
+  return (
+    <div className="flex items-center justify-between py-3 gap-3">
+      <label className="text-sm text-neutral-300 shrink-0">LLM model</label>
+      <div className="flex items-center gap-2">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="max-w-xs px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-200 text-sm focus:outline-none focus:border-blue-500 transition-colors"
+        >
+          {models.length === 0 && !loading && (
+            <option value={value}>{parseModelValue(value).modelId}</option>
+          )}
+          {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((provider) => {
+            const group = grouped[provider];
+            if (!group?.length) return null;
+            return (
+              <optgroup key={provider} label={PROVIDER_LABELS[provider]}>
+                {group.map((m) => (
+                  <option key={toModelValue(m.provider, m.id)} value={toModelValue(m.provider, m.id)}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </optgroup>
+            );
+          })}
+        </select>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="px-3 py-2 rounded-lg text-xs font-medium bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-600 text-neutral-300 transition-colors shrink-0"
+        >
+          {loading ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { settings, saveSetting, loadSettings, loaded } = useSettingsStore();
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   useEffect(() => {
     if (!loaded) {
       loadSettings();
     }
   }, [loaded, loadSettings]);
+
+  const refreshModels = useCallback(async () => {
+    setModelsLoading(true);
+    try {
+      const result = await fetchAllModels({
+        anthropic: settings.anthropic_api_key || undefined,
+        openai: settings.openai_api_key || undefined,
+        openrouter: settings.openrouter_api_key || undefined,
+        gemini: settings.gemini_api_key || undefined,
+      });
+      setModels(result);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [settings.anthropic_api_key, settings.openai_api_key, settings.openrouter_api_key, settings.gemini_api_key]);
+
+  useEffect(() => {
+    if (loaded) {
+      refreshModels();
+    }
+  }, [loaded, refreshModels]);
 
   const testAnthropicKey = async () => {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -415,18 +502,11 @@ export default function Settings() {
           Analysis Preferences
         </h2>
         <div className="divide-y divide-neutral-800">
-          <SelectField<LlmModel>
-            label="LLM model"
+          <ModelSelector
             value={settings.llm_model}
-            options={[
-              { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-              { value: "claude-haiku-4-20250414", label: "Claude Haiku 4 (cheaper)" },
-              { value: "gpt-4o", label: "GPT-4o (requires OpenAI key)" },
-              { value: "openrouter/auto", label: "OpenRouter Auto (requires OpenRouter key)" },
-              { value: "openrouter/anthropic/claude-sonnet-4", label: "OpenRouter Claude Sonnet 4" },
-              { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (requires Gemini key)" },
-              { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-            ]}
+            models={models}
+            loading={modelsLoading}
+            onRefresh={refreshModels}
             onChange={(v) => saveSetting("llm_model", v)}
           />
           <NumberField

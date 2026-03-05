@@ -12,7 +12,7 @@ const DEFAULTS: AppSettings = {
   video_format: "mp4",
   resolution: "best",
   max_concurrent_downloads: 2,
-  llm_model: "claude-sonnet-4-20250514",
+  llm_model: "anthropic:claude-sonnet-4-20250514",
   max_moments_per_analysis: 10,
   theme: "dark",
   check_for_updates: true,

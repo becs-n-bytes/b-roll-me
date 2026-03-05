@@ -20,7 +20,7 @@ Script -> [M1: Analyze] -> Moments -> [M2: Search+Transcript] -> Results -> [M3:
 
 **`src/pages/Dashboard.tsx`** - Project list/grid. CRUD operations via `projectStore`. Each project card shows name and timestamps. "New Project" button opens `NewProjectDialog`.
 
-**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, YouTube with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (LLM model, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
+**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, OpenRouter, Gemini, YouTube with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (dynamic LLM model selector via `ModelSelector` component that fetches models from all configured provider APIs, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
 
 #### Components
 
@@ -48,7 +48,9 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 #### Lib (Business Logic)
 
-**`src/lib/llm.ts`** - LLM abstraction. `callLlm(systemPrompt, userMessage, apiKey, model?)` routes to `callAnthropic()` or `callOpenAi()` based on model. `analyzeScript(scriptText, apiKey, model?)` is the high-level analysis function. All API calls use `fetch` from `@tauri-apps/plugin-http`.
+**`src/lib/models.ts`** - Model discovery and selection. `fetchAllModels(keys)` queries all 4 provider APIs (Anthropic, OpenAI, OpenRouter, Gemini) in parallel via `Promise.allSettled` and returns `ModelOption[]`. `parseModelValue(value)` splits a `provider:model_id` string. `toModelValue(provider, modelId)` creates one. Exports `LlmProvider` and `ModelOption` types. Per-provider fetch functions apply filters (Anthropic: `claude-*` only; OpenAI: excludes instruct/realtime/audio/transcription; Gemini: `generateContent` support only). OpenRouter listing requires no auth.
+
+**`src/lib/llm.ts`** - LLM abstraction. `callLlm(systemPrompt, userMessage, apiKey, model?)` uses `parseModelValue()` to determine provider, then routes to `callAnthropic()`, `callOpenAi()`, `callOpenAiCompatible()` (for OpenRouter), or `callGemini()`. `analyzeScript(scriptText, apiKey, model?)` is the high-level analysis function. All API calls use `fetch` from `@tauri-apps/plugin-http`.
 
 **`src/lib/evaluator.ts`** - Clip evaluation. `evaluateClips(scriptExcerpt, editorialNote, suggestionDescriptions, results, apiKey, model?)` sends a batch of search results to the LLM for scoring. Uses `callLlm()` internally. `estimateEvaluationTokens()` provides cost estimates.
 
@@ -64,7 +66,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 #### Types
 
-**`src/types/index.ts`** - All shared interfaces: `Project`, `BRollMoment`, `BRollSuggestion`, `Moment`, `SearchResult`, `EvaluatedClip`, `TranscriptSegment`, `TranscriptMatch`, `AppSettings`. Type unions: `VideoFormat`, `Resolution`, `LlmModel`.
+**`src/types/index.ts`** - All shared interfaces: `Project`, `BRollMoment`, `BRollSuggestion`, `Moment`, `SearchResult`, `EvaluatedClip`, `TranscriptSegment`, `TranscriptMatch`, `AppSettings`. Type unions: `VideoFormat`, `Resolution`. `LlmModel` is a `string` type (was a fixed union; now dynamic since models are fetched from provider APIs).
 
 ### Backend Layer (Rust + Tauri v2)
 
@@ -78,7 +80,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 **`src-tauri/tauri.conf.json`** - Tauri configuration. CSP is null (no restrictions). External binaries: yt-dlp and ffmpeg. Window: 1200x800, min 900x600.
 
-**`src-tauri/capabilities/default.json`** - Security permissions. HTTP fetch is scoped to Anthropic, OpenAI, Google APIs, and YouTube. Shell spawn/execute is scoped to the two sidecar binaries only.
+**`src-tauri/capabilities/default.json`** - Security permissions. HTTP fetch is scoped to Anthropic, OpenAI, OpenRouter, Google APIs (Gemini + YouTube). Shell spawn/execute is scoped to the two sidecar binaries only.
 
 ### Test Infrastructure
 
@@ -87,7 +89,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 **`src/test/mocks.ts`** - Shared mock utilities. Has known pre-existing TS errors about `require` (harmless).
 
 Test files are colocated in `__tests__/` directories next to their source:
-- `src/lib/__tests__/` - 5 test files (llm, evaluator, youtube, transcript, downloader)
+- `src/lib/__tests__/` - 6 test files (llm, models, evaluator, youtube, transcript, downloader)
 - `src/stores/__tests__/` - 6 test files (settings, project, moment, search, evaluation, download)
 - `src/pages/__tests__/` - 3 test files (Dashboard, ProjectView, Settings)
 
@@ -160,3 +162,5 @@ Test files are colocated in `__tests__/` directories next to their source:
 5. **`transcript_cache` does not expire**. Cached transcripts are stored indefinitely. If a video's captions change, the app will use stale data until the cache row is manually deleted.
 
 6. **All table IDs are TEXT (UUIDs)** generated client-side via `crypto.randomUUID()`. There are no auto-incrementing integer IDs anywhere in the schema.
+
+7. **Dynamic model design**: Models stored as `provider:model_id` format (e.g., `anthropic:claude-sonnet-4-20250514`). `callLlm()` uses `parseModelValue()` to split provider and route accordingly. Legacy model strings without a colon default to Anthropic provider.

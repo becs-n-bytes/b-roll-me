@@ -8,7 +8,7 @@ Instructions for AI agents working on this codebase.
 # Build & verify
 npx tsc --noEmit                  # TypeScript check (ignore mocks.ts errors)
 npx vite build                    # Frontend production build
-npm test                          # 188 Vitest tests
+npm test                          # 214 Vitest tests
 source "$HOME/.cargo/env" && cd src-tauri && cargo test  # 7 Rust tests
 
 # Development
@@ -61,7 +61,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 ```
 
 ### LLM Integration
-Both Anthropic and OpenAI are supported. The `callLlm()` function in `src/lib/llm.ts` routes to the correct provider based on the model setting. Functions that call the LLM accept an optional `model?: LlmModel` parameter; if omitted, the user's configured model from settings is used.
+Four providers are supported: Anthropic, OpenAI, OpenRouter, and Google Gemini. Models are stored as `provider:model_id` strings (e.g., `anthropic:claude-sonnet-4-20250514`, `openai:gpt-4o`, `openrouter:anthropic/claude-3.5-sonnet`, `gemini:gemini-2.5-flash`). The `callLlm()` function in `src/lib/llm.ts` uses `parseModelValue()` to split the provider and route accordingly. The model selector in Settings dynamically fetches available models from all configured provider APIs. Functions that call the LLM accept an optional `model?: string` parameter; if omitted, the user's configured model from settings is used.
 
 ### Tauri v2 Specifics
 
@@ -123,8 +123,11 @@ The `settings` table is a simple key-value store. All settings are stored as tex
 
 ## Project Modules
 
+### lib/models.ts
+Model discovery and selection. `fetchAllModels()` queries all 4 provider APIs in parallel via `Promise.allSettled` and returns `ModelOption[]` with provider, id, and display name. `parseModelValue()` splits a `provider:model_id` string. `toModelValue()` creates one. Provider-specific fetch functions filter results (e.g., Anthropic to `claude-*` only, OpenAI excludes instruct/realtime/audio, Gemini filters to `generateContent` support). OpenRouter models are always fetched (no key required for listing).
+
 ### lib/llm.ts
-LLM abstraction layer. Exports `callLlm()` (generic), `analyzeScript()` (for B-Roll analysis). Routes to Anthropic or OpenAI based on model selection. Handles auth errors, rate limits, and server errors.
+LLM abstraction layer. Exports `callLlm()` (generic), `analyzeScript()` (for B-Roll analysis). Uses `parseModelValue()` from `models.ts` to determine provider, then routes to `callAnthropic()`, `callOpenAi()`, `callOpenAiCompatible()` (OpenRouter), or `callGemini()`. Handles auth errors, rate limits, and server errors.
 
 ### lib/evaluator.ts
 Clip evaluation via LLM. Takes search results with transcript matches and returns relevance scores, suggested timestamps, and usability flags. Uses `callLlm()` internally.

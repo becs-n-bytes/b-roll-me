@@ -35,7 +35,7 @@ describe("settingsStore", () => {
     expect(settings.video_format).toBe("mp4");
     expect(settings.resolution).toBe("best");
     expect(settings.max_concurrent_downloads).toBe(2);
-    expect(settings.llm_model).toBe("claude-sonnet-4-20250514");
+    expect(settings.llm_model).toBe("anthropic:claude-sonnet-4-20250514");
     expect(settings.max_moments_per_analysis).toBe(10);
     expect(settings.theme).toBe("dark");
     expect(settings.check_for_updates).toBe(true);

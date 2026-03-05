@@ -2,6 +2,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { BROLL_SYSTEM_PROMPT } from "./prompts";
 import type { BRollMoment, LlmModel } from "../types";
 import { getSettingFromDb } from "../stores/settingsStore";
+import { parseModelValue } from "./models";
 
 interface AnthropicResponse {
   content: { type: string; text: string }[];
@@ -152,31 +153,30 @@ export async function callLlm(
   model?: LlmModel
 ): Promise<string> {
   const selectedModel = model ?? await getSettingFromDb("llm_model");
+  const { provider, modelId } = parseModelValue(selectedModel);
 
-  if (selectedModel === "gpt-4o") {
-    return callOpenAiCompatible(
-      "https://api.openai.com/v1/chat/completions",
-      apiKey, "gpt-4o", systemPrompt, userMessage, "OpenAI",
-    );
+  switch (provider) {
+    case "openai": {
+      const key = await getSettingFromDb("openai_api_key") || apiKey;
+      return callOpenAiCompatible(
+        "https://api.openai.com/v1/chat/completions",
+        key, modelId, systemPrompt, userMessage, "OpenAI",
+      );
+    }
+    case "openrouter": {
+      const key = await getSettingFromDb("openrouter_api_key");
+      return callOpenAiCompatible(
+        "https://openrouter.ai/api/v1/chat/completions",
+        key, modelId, systemPrompt, userMessage, "OpenRouter",
+      );
+    }
+    case "gemini": {
+      const key = await getSettingFromDb("gemini_api_key");
+      return callGemini(key, modelId, systemPrompt, userMessage);
+    }
+    default:
+      return callAnthropic(apiKey, modelId, systemPrompt, userMessage);
   }
-
-  if (selectedModel.startsWith("openrouter/")) {
-    const openrouterModel = selectedModel === "openrouter/auto"
-      ? "openrouter/auto"
-      : selectedModel.replace("openrouter/", "");
-    const orKey = await getSettingFromDb("openrouter_api_key");
-    return callOpenAiCompatible(
-      "https://openrouter.ai/api/v1/chat/completions",
-      orKey, openrouterModel, systemPrompt, userMessage, "OpenRouter",
-    );
-  }
-
-  if (selectedModel.startsWith("gemini-")) {
-    const geminiKey = await getSettingFromDb("gemini_api_key");
-    return callGemini(geminiKey, selectedModel, systemPrompt, userMessage);
-  }
-
-  return callAnthropic(apiKey, selectedModel, systemPrompt, userMessage);
 }
 
 export async function analyzeScript(

@@ -26,7 +26,9 @@ The app does not ship with API keys. You provide your own in Settings:
 
 - **Anthropic API Key** - For script analysis and clip evaluation. Get one at [console.anthropic.com](https://console.anthropic.com/).
 - **YouTube Data API Key** - For searching YouTube. Get one from [Google Cloud Console](https://console.cloud.google.com/apis/credentials) with the YouTube Data API v3 enabled.
-- **OpenAI API Key** (optional) - Only needed if you select GPT-4o as the analysis model.
+- **OpenAI API Key** (optional) - For GPT-4o and other OpenAI models.
+- **OpenRouter API Key** (optional) - Access to many models through a single key. Get one at [openrouter.ai](https://openrouter.ai/).
+- **Google Gemini API Key** (optional) - For Gemini Flash and Pro models. Get one at [aistudio.google.com](https://aistudio.google.com/).
 
 ## Setup
 
@@ -78,7 +80,7 @@ The Tauri dev command compiles the Rust backend, starts Vite on port 1420, and o
 ## Testing
 
 ```bash
-# Run all frontend tests (188 tests across 14 files)
+# Run all frontend tests (214 tests across 15 files)
 npm test
 
 # Watch mode
@@ -138,7 +140,7 @@ The frontend is a single-page app with three routes:
 
 - **Dashboard** (`/`) - Project grid with create/delete. Each project is a separate script analysis workspace.
 - **Project View** (`/project/:id`) - The main workspace. Script editor, analysis results, search results, evaluation scores, download queue, preview modal, and batch pipeline controls.
-- **Settings** (`/settings`) - API keys (with Test Connection), download preferences, analysis preferences, theme, and about section.
+- **Settings** (`/settings`) - API keys for 5 providers (with Test Connection), download preferences, analysis preferences with dynamic model selector (fetches available models from all configured provider APIs), theme, and about section.
 
 State is managed with Zustand stores, each backed by SQLite for persistence:
 
@@ -206,7 +208,8 @@ b-roll-me/
       downloadStore.ts          # Download queue management
     lib/
       database.ts               # SQLite singleton via plugin-sql
-      llm.ts                    # LLM abstraction (Anthropic + OpenAI routing)
+      models.ts                 # Model discovery from provider APIs
+      llm.ts                    # LLM abstraction (4-provider routing)
       prompts.ts                # System prompts for analysis and evaluation
       youtube.ts                # YouTube Data API v3 search
       transcript.ts             # YouTube transcript fetching + search
