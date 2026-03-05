@@ -8,8 +8,13 @@ interface AnthropicResponse {
   error?: { type: string; message: string };
 }
 
-interface OpenAiResponse {
+interface OpenAiCompatibleResponse {
   choices: { message: { content: string } }[];
+  error?: { message: string };
+}
+
+interface GeminiResponse {
+  candidates?: { content: { parts: { text: string }[] } }[];
   error?: { message: string };
 }
 
@@ -59,17 +64,21 @@ async function callAnthropic(
   return textContent.text;
 }
 
-async function callOpenAi(
+async function callOpenAiCompatible(
+  url: string,
   apiKey: string,
   model: string,
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  providerLabel: string,
+  extraHeaders?: Record<string, string>
 ): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model,
@@ -81,20 +90,59 @@ async function callOpenAi(
     }),
   });
 
-  if (response.status === 401) throw new Error("Invalid API key. Check your OpenAI API key in Settings.");
+  if (response.status === 401) throw new Error(`Invalid API key. Check your ${providerLabel} API key in Settings.`);
   if (response.status === 429) throw new Error("Rate limited. Please wait a moment and try again.");
-  if (response.status >= 500) throw new Error("OpenAI API server error. Please try again later.");
+  if (response.status >= 500) throw new Error(`${providerLabel} API server error. Please try again later.`);
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`API error (${response.status}): ${errorText}`);
   }
 
-  const data = (await response.json()) as OpenAiResponse;
+  const data = (await response.json()) as OpenAiCompatibleResponse;
   if (data.error) throw new Error(`API error: ${data.error.message}`);
 
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("No content in API response");
   return content;
+}
+
+async function callGemini(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userMessage: string
+): Promise<string> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: userMessage }] }],
+        generationConfig: { maxOutputTokens: 4096 },
+      }),
+    },
+  );
+
+  if (response.status === 400) {
+    const text = await response.text();
+    if (text.includes("API_KEY_INVALID")) throw new Error("Invalid API key. Check your Gemini API key in Settings.");
+    throw new Error(`API error (400): ${text}`);
+  }
+  if (response.status === 429) throw new Error("Rate limited. Please wait a moment and try again.");
+  if (response.status >= 500) throw new Error("Gemini API server error. Please try again later.");
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API error (${response.status}): ${errorText}`);
+  }
+
+  const data = (await response.json()) as GeminiResponse;
+  if (data.error) throw new Error(`API error: ${data.error.message}`);
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("No content in API response");
+  return text;
 }
 
 export async function callLlm(
@@ -106,8 +154,28 @@ export async function callLlm(
   const selectedModel = model ?? await getSettingFromDb("llm_model");
 
   if (selectedModel === "gpt-4o") {
-    return callOpenAi(apiKey, "gpt-4o", systemPrompt, userMessage);
+    return callOpenAiCompatible(
+      "https://api.openai.com/v1/chat/completions",
+      apiKey, "gpt-4o", systemPrompt, userMessage, "OpenAI",
+    );
   }
+
+  if (selectedModel.startsWith("openrouter/")) {
+    const openrouterModel = selectedModel === "openrouter/auto"
+      ? "openrouter/auto"
+      : selectedModel.replace("openrouter/", "");
+    const orKey = await getSettingFromDb("openrouter_api_key");
+    return callOpenAiCompatible(
+      "https://openrouter.ai/api/v1/chat/completions",
+      orKey, openrouterModel, systemPrompt, userMessage, "OpenRouter",
+    );
+  }
+
+  if (selectedModel.startsWith("gemini-")) {
+    const geminiKey = await getSettingFromDb("gemini_api_key");
+    return callGemini(geminiKey, selectedModel, systemPrompt, userMessage);
+  }
+
   return callAnthropic(apiKey, selectedModel, systemPrompt, userMessage);
 }
 

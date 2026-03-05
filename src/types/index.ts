@@ -64,11 +64,20 @@ export interface SearchResult {
 
 export type VideoFormat = "mp4" | "webm";
 export type Resolution = "720" | "1080" | "best";
-export type LlmModel = "claude-sonnet-4-20250514" | "claude-haiku-4-20250414" | "gpt-4o";
+export type LlmModel =
+  | "claude-sonnet-4-20250514"
+  | "claude-haiku-4-20250414"
+  | "gpt-4o"
+  | "openrouter/auto"
+  | "openrouter/anthropic/claude-sonnet-4"
+  | "gemini-2.5-flash"
+  | "gemini-2.5-pro";
 
 export interface AppSettings {
   anthropic_api_key: string;
   openai_api_key: string;
+  openrouter_api_key: string;
+  gemini_api_key: string;
   youtube_api_key: string;
   default_output_dir: string;
   video_format: VideoFormat;

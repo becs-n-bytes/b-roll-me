@@ -13,7 +13,7 @@ function ApiKeySection({
   testEndpoint,
 }: {
   label: string;
-  settingsKey: "anthropic_api_key" | "openai_api_key" | "youtube_api_key";
+  settingsKey: "anthropic_api_key" | "openai_api_key" | "openrouter_api_key" | "gemini_api_key" | "youtube_api_key";
   placeholder: string;
   helpText: string;
   testEndpoint?: () => Promise<void>;
@@ -279,6 +279,33 @@ export default function Settings() {
     }
   };
 
+  const testOpenRouterKey = async () => {
+    const response = await fetch("https://openrouter.ai/api/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${settings.openrouter_api_key}`,
+      },
+    });
+    if (response.status === 401) throw new Error("Invalid API key");
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`API error (${response.status}): ${text}`);
+    }
+  };
+
+  const testGeminiKey = async () => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${settings.gemini_api_key}`
+    );
+    if (response.status === 400 || response.status === 403) {
+      throw new Error("Invalid API key");
+    }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`API error (${response.status}): ${text}`);
+    }
+  };
+
   const testYouTubeKey = async () => {
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=test&maxResults=1&key=${settings.youtube_api_key}`;
     const response = await fetch(url);
@@ -316,6 +343,22 @@ export default function Settings() {
           placeholder="sk-..."
           helpText="Optional. Required only if using GPT-4o for analysis."
           testEndpoint={testOpenAiKey}
+        />
+
+        <ApiKeySection
+          label="OpenRouter API Key"
+          settingsKey="openrouter_api_key"
+          placeholder="sk-or-..."
+          helpText="Optional. Gives access to many models through a single key. Get one at openrouter.ai."
+          testEndpoint={testOpenRouterKey}
+        />
+
+        <ApiKeySection
+          label="Google Gemini API Key"
+          settingsKey="gemini_api_key"
+          placeholder="AIza..."
+          helpText="Optional. Required for Gemini Flash or Pro models. Get one at aistudio.google.com."
+          testEndpoint={testGeminiKey}
         />
 
         <ApiKeySection
@@ -379,6 +422,10 @@ export default function Settings() {
               { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
               { value: "claude-haiku-4-20250414", label: "Claude Haiku 4 (cheaper)" },
               { value: "gpt-4o", label: "GPT-4o (requires OpenAI key)" },
+              { value: "openrouter/auto", label: "OpenRouter Auto (requires OpenRouter key)" },
+              { value: "openrouter/anthropic/claude-sonnet-4", label: "OpenRouter Claude Sonnet 4" },
+              { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash (requires Gemini key)" },
+              { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
             ]}
             onChange={(v) => saveSetting("llm_model", v)}
           />

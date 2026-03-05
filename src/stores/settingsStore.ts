@@ -5,6 +5,8 @@ import type { AppSettings, VideoFormat, Resolution, LlmModel } from "../types";
 const DEFAULTS: AppSettings = {
   anthropic_api_key: "",
   openai_api_key: "",
+  openrouter_api_key: "",
+  gemini_api_key: "",
   youtube_api_key: "",
   default_output_dir: "",
   video_format: "mp4",

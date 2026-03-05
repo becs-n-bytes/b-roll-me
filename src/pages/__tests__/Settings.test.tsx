@@ -42,22 +42,32 @@ describe("Settings", () => {
     expect(screen.getByPlaceholderText("sk-...")).toBeInTheDocument();
   });
 
+  it("shows OpenRouter API Key input", () => {
+    render(<Settings />);
+    expect(screen.getByText("OpenRouter API Key")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("sk-or-...")).toBeInTheDocument();
+  });
+
+  it("shows Gemini API Key input", () => {
+    render(<Settings />);
+    expect(screen.getByText("Google Gemini API Key")).toBeInTheDocument();
+  });
+
   it("shows YouTube API Key input", () => {
     render(<Settings />);
     expect(screen.getByText("YouTube Data API Key")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("AIza...")).toBeInTheDocument();
   });
 
   it("shows Test button for each API key", () => {
     render(<Settings />);
     const testButtons = screen.getAllByText("Test");
-    expect(testButtons.length).toBe(3);
+    expect(testButtons.length).toBe(5);
   });
 
   it("shows Save button for each API key", () => {
     render(<Settings />);
     const saveButtons = screen.getAllByText("Save");
-    expect(saveButtons.length).toBe(3);
+    expect(saveButtons.length).toBe(5);
   });
 
   it("renders Download Preferences section", () => {
@@ -95,6 +105,9 @@ describe("Settings", () => {
     expect(screen.getByText("Claude Sonnet 4")).toBeInTheDocument();
     expect(screen.getByText("Claude Haiku 4 (cheaper)")).toBeInTheDocument();
     expect(screen.getByText("GPT-4o (requires OpenAI key)")).toBeInTheDocument();
+    expect(screen.getByText("OpenRouter Auto (requires OpenRouter key)")).toBeInTheDocument();
+    expect(screen.getByText("Gemini 2.5 Flash (requires Gemini key)")).toBeInTheDocument();
+    expect(screen.getByText("Gemini 2.5 Pro")).toBeInTheDocument();
   });
 
   it("shows format options in select", () => {
@@ -123,6 +136,6 @@ describe("Settings", () => {
   it("shows not configured state for empty keys", () => {
     render(<Settings />);
     const notConfigured = screen.getAllByText("Not configured");
-    expect(notConfigured.length).toBe(3);
+    expect(notConfigured.length).toBe(5);
   });
 });
