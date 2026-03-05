@@ -81,9 +81,9 @@ async function fetchOpenRouterModels(): Promise<ModelOption[]> {
 }
 
 async function fetchGeminiModels(apiKey: string): Promise<ModelOption[]> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
-  );
+  const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+  url.searchParams.set("key", apiKey);
+  const response = await fetch(url.toString());
   if (!response.ok) return [];
   const data = (await response.json()) as {
     models: {
@@ -112,11 +112,11 @@ export async function fetchAllModels(keys: {
 }): Promise<ModelOption[]> {
   const fetches: Promise<ModelOption[]>[] = [];
 
-  if (keys.anthropic) fetches.push(fetchAnthropicModels(keys.anthropic));
-  if (keys.openai) fetches.push(fetchOpenAiModels(keys.openai));
-  if (keys.openrouter) fetches.push(fetchOpenRouterModels());
+  if (keys.anthropic?.trim()) fetches.push(fetchAnthropicModels(keys.anthropic.trim()));
+  if (keys.openai?.trim()) fetches.push(fetchOpenAiModels(keys.openai.trim()));
+  if (keys.openrouter?.trim()) fetches.push(fetchOpenRouterModels());
   else fetches.push(fetchOpenRouterModels());
-  if (keys.gemini) fetches.push(fetchGeminiModels(keys.gemini));
+  if (keys.gemini?.trim()) fetches.push(fetchGeminiModels(keys.gemini.trim()));
 
   const results = await Promise.allSettled(fetches);
   return results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));

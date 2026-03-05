@@ -31,13 +31,14 @@ interface SettingsState {
 }
 
 function deserialize<K extends keyof AppSettings>(key: K, raw: string): AppSettings[K] {
+  const trimmed = raw.trim();
   if (key === "max_concurrent_downloads" || key === "max_moments_per_analysis") {
-    return Number(raw) as AppSettings[K];
+    return Number(trimmed) as AppSettings[K];
   }
   if (key === "check_for_updates") {
-    return (raw === "true") as AppSettings[K];
+    return (trimmed === "true") as AppSettings[K];
   }
-  return raw as AppSettings[K];
+  return trimmed as AppSettings[K];
 }
 
 function serialize(value: unknown): string {
@@ -68,13 +69,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   saveSetting: async (key, value) => {
     const db = await getDb();
-    const raw = serialize(value);
+    const raw = serialize(value).trim();
     await db.execute(
       "INSERT OR REPLACE INTO settings (key, value) VALUES ($1, $2)",
       [key, raw]
     );
     set((state) => ({
-      settings: { ...state.settings, [key]: value },
+      settings: { ...state.settings, [key]: deserialize(key, raw) },
     }));
   },
 

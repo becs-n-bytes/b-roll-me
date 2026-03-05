@@ -43,12 +43,14 @@ export async function searchYouTube(
   apiKey: string,
   maxResults = 5
 ): Promise<YouTubeResult[]> {
+  const key = apiKey.trim();
+  if (!key) throw new Error("YouTube API key is not configured. Add it in Settings.");
   const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
   searchUrl.searchParams.set("part", "snippet");
   searchUrl.searchParams.set("type", "video");
   searchUrl.searchParams.set("q", query);
   searchUrl.searchParams.set("maxResults", String(maxResults));
-  searchUrl.searchParams.set("key", apiKey);
+  searchUrl.searchParams.set("key", key);
 
   const searchResponse = await fetch(searchUrl.toString());
 
@@ -74,7 +76,7 @@ export async function searchYouTube(
   const detailsUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
   detailsUrl.searchParams.set("part", "contentDetails");
   detailsUrl.searchParams.set("id", videoIds);
-  detailsUrl.searchParams.set("key", apiKey);
+  detailsUrl.searchParams.set("key", key);
 
   const detailsResponse = await fetch(detailsUrl.toString());
   const detailsData = detailsResponse.ok

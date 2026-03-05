@@ -167,13 +167,14 @@ export async function callLlm(
   maxTokens?: number,
   onChunk?: (text: string) => void,
 ): Promise<string> {
+  const trimmedKey = apiKey.trim();
   const selectedModel = model ?? await getSettingFromDb("llm_model");
   const { provider, modelId } = parseModelValue(selectedModel);
   const tokens = maxTokens ?? MAX_OUTPUT_TOKENS;
 
   switch (provider) {
     case "openai": {
-      const key = await getSettingFromDb("openai_api_key") || apiKey;
+      const key = await getSettingFromDb("openai_api_key") || trimmedKey;
       if (onChunk) return streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenAI", tokens, onChunk);
       return callOpenAiCompatible(
         "https://api.openai.com/v1/chat/completions",
@@ -194,7 +195,7 @@ export async function callLlm(
       return callGemini(key, modelId, systemPrompt, userMessage, tokens);
     }
     default: {
-      const key = await getSettingFromDb("anthropic_api_key") || apiKey;
+      const key = await getSettingFromDb("anthropic_api_key") || trimmedKey;
       if (onChunk) return streamAnthropic(key, modelId, systemPrompt, userMessage, tokens, onChunk);
       return callAnthropic(key, modelId, systemPrompt, userMessage, tokens);
     }
