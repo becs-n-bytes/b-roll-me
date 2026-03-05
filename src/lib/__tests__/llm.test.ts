@@ -46,7 +46,7 @@ describe("analyzeScript", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.model).toBe("claude-sonnet-4-20250514");
-    expect(body.max_tokens).toBe(16384);
+    expect(body.max_tokens).toBe(5000);
     expect(body.messages[0].role).toBe("user");
     expect(body.messages[0].content).toContain("my script");
     expect(body.system).toBeTruthy();
@@ -225,6 +225,18 @@ describe("analyzeScript", () => {
     await analyzeScript("script", "key");
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.system).toContain("at most 10 moments");
+  });
+
+  it("scales max_tokens with max_moments setting", async () => {
+    mockFetch.mockResolvedValue(
+      makeSuccessResponse([
+        { scriptExcerpt: "test", timestampHint: "0:00", editorialNote: "note", suggestions: [] },
+      ]),
+    );
+
+    await analyzeScript("script", "key");
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.max_tokens).toBe(5000);
   });
 
   it("shows user-friendly error on truncated JSON response", async () => {

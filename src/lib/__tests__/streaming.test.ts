@@ -48,30 +48,30 @@ describe("streaming", () => {
         'data: {"type":"message_stop"}',
       ]));
 
-      const result = await streamAnthropic("key", "model", "system", "user", (chunk) => chunks.push(chunk));
+      const result = await streamAnthropic("key", "model", "system", "user", 8192, (chunk) => chunks.push(chunk));
       expect(result).toBe("Hello world");
       expect(chunks).toEqual(["Hello", " world"]);
     });
 
-    it("sends stream: true in request body", async () => {
+    it("sends stream: true and maxTokens in request body", async () => {
       mockFetch.mockResolvedValue(makeResponse(200, [
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}',
       ]));
 
-      await streamAnthropic("sk-key", "claude-sonnet-4-20250514", "sys", "usr", () => {});
+      await streamAnthropic("sk-key", "claude-sonnet-4-20250514", "sys", "usr", 5000, () => {});
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.stream).toBe(true);
-      expect(body.max_tokens).toBe(16384);
+      expect(body.max_tokens).toBe(5000);
     });
 
     it("throws on 401", async () => {
       mockFetch.mockResolvedValue(makeResponse(401));
-      await expect(streamAnthropic("bad", "m", "s", "u", () => {})).rejects.toThrow("Invalid API key");
+      await expect(streamAnthropic("bad", "m", "s", "u", 4096, () => {})).rejects.toThrow("Invalid API key");
     });
 
     it("throws on 429", async () => {
       mockFetch.mockResolvedValue(makeResponse(429));
-      await expect(streamAnthropic("k", "m", "s", "u", () => {})).rejects.toThrow("Rate limited");
+      await expect(streamAnthropic("k", "m", "s", "u", 4096, () => {})).rejects.toThrow("Rate limited");
     });
 
     it("ignores non-text-delta events", async () => {
@@ -82,7 +82,7 @@ describe("streaming", () => {
         'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
       ]));
 
-      const result = await streamAnthropic("k", "m", "s", "u", (c) => chunks.push(c));
+      const result = await streamAnthropic("k", "m", "s", "u", 4096, (c) => chunks.push(c));
       expect(result).toBe("only this");
       expect(chunks).toEqual(["only this"]);
     });
@@ -99,7 +99,7 @@ describe("streaming", () => {
         "data: [DONE]",
       ]));
 
-      const result = await streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", "key", "gpt-4", "sys", "usr", "OpenAI", (c) => chunks.push(c));
+      const result = await streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", "key", "gpt-4", "sys", "usr", "OpenAI", 8192, (c) => chunks.push(c));
       expect(result).toBe("Hello there");
       expect(chunks).toEqual(["Hello", " there"]);
     });
@@ -112,13 +112,13 @@ describe("streaming", () => {
         'data: {"choices":[{"delta":{"content":"after"}}]}',
       ]));
 
-      const result = await streamOpenAiCompatible("url", "k", "m", "s", "u", "Test", (c) => chunks.push(c));
+      const result = await streamOpenAiCompatible("url", "k", "m", "s", "u", "Test", 4096, (c) => chunks.push(c));
       expect(result).toBe("before");
     });
 
     it("throws on 401 with provider label", async () => {
       mockFetch.mockResolvedValue(makeResponse(401));
-      await expect(streamOpenAiCompatible("url", "k", "m", "s", "u", "OpenRouter", () => {})).rejects.toThrow("Check your OpenRouter API key");
+      await expect(streamOpenAiCompatible("url", "k", "m", "s", "u", "OpenRouter", 4096, () => {})).rejects.toThrow("Check your OpenRouter API key");
     });
   });
 
@@ -130,7 +130,7 @@ describe("streaming", () => {
         'data: {"candidates":[{"content":{"parts":[{"text":" Gemini"}],"role":"model"}}]}',
       ]));
 
-      const result = await streamGemini("key", "gemini-pro", "sys", "usr", (c) => chunks.push(c));
+      const result = await streamGemini("key", "gemini-pro", "sys", "usr", 8192, (c) => chunks.push(c));
       expect(result).toBe("Hello Gemini");
       expect(chunks).toEqual(["Hello", " Gemini"]);
     });
@@ -140,11 +140,21 @@ describe("streaming", () => {
         'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}',
       ]));
 
-      await streamGemini("api-key", "gemini-pro", "s", "u", () => {});
+      await streamGemini("api-key", "gemini-pro", "s", "u", 4096, () => {});
       const url = mockFetch.mock.calls[0][0];
       expect(url).toContain(":streamGenerateContent");
       expect(url).toContain("alt=sse");
       expect(url).toContain("key=api-key");
+    });
+
+    it("passes maxTokens to Gemini request body", async () => {
+      mockFetch.mockResolvedValue(makeResponse(200, [
+        'data: {"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}',
+      ]));
+
+      await streamGemini("key", "gemini-pro", "s", "u", 7000, () => {});
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.generationConfig.maxOutputTokens).toBe(7000);
     });
 
     it("throws on invalid API key (400)", async () => {
@@ -153,7 +163,7 @@ describe("streaming", () => {
         status: 400,
         text: () => Promise.resolve("API_KEY_INVALID"),
       });
-      await expect(streamGemini("bad", "m", "s", "u", () => {})).rejects.toThrow("Invalid API key");
+      await expect(streamGemini("bad", "m", "s", "u", 4096, () => {})).rejects.toThrow("Invalid API key");
     });
   });
 });

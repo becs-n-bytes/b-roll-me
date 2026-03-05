@@ -1,5 +1,5 @@
 import { EVALUATION_SYSTEM_PROMPT } from "./prompts";
-import { callLlm } from "./llm";
+import { callLlm, estimateMaxTokens, TOKENS_PER_EVALUATION } from "./llm";
 import type { LlmModel } from "../types";
 
 interface EvaluationInput {
@@ -27,10 +27,6 @@ function extractJson(text: string): string {
     throw new Error("No JSON object found in response");
   }
   return text.slice(start, end + 1);
-}
-
-export function estimateEvaluationTokens(resultCount: number): number {
-  return Math.ceil(resultCount * 200 + 400);
 }
 
 function formatDuration(seconds: number): string {
@@ -62,11 +58,14 @@ export async function evaluateClips(
 
   const userMessage = `Context:\nScript excerpt: "${scriptExcerpt}"\nEditorial note: ${editorialNote}\nWhat we're looking for: ${suggestionDescriptions.join("; ")}\n\nSearch results to evaluate:\n${resultsText}`;
 
+  const maxTokens = estimateMaxTokens(results.length, TOKENS_PER_EVALUATION);
+
   const text = await callLlm(
     EVALUATION_SYSTEM_PROMPT,
     userMessage,
     apiKey,
     model,
+    maxTokens,
   );
 
   const jsonStr = extractJson(text);

@@ -5,7 +5,7 @@ import { useMomentStore } from "../stores/momentStore";
 import { useSearchStore } from "../stores/searchStore";
 import { useDownloadStore, type DownloadItem } from "../stores/downloadStore";
 import { analyzeScript } from "../lib/llm";
-import { estimateEvaluationTokens } from "../lib/evaluator";
+import { estimateMaxTokens, TOKENS_PER_EVALUATION } from "../lib/llm";
 import { ensureOutputDir } from "../lib/downloader";
 import { getDb } from "../lib/database";
 import { getSettingFromDb } from "../stores/settingsStore";
@@ -438,7 +438,7 @@ function MomentCard({
                   onClick={onEvaluate}
                   disabled={!hasLlmKey || isEvaluating || searchResults.length === 0}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-600 hover:bg-purple-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white transition-colors"
-                  title={`Evaluate ${searchResults.length} results (~${estimateEvaluationTokens(searchResults.length)} tokens)`}
+                  title={`Evaluate ${searchResults.length} results (~${estimateMaxTokens(searchResults.length, TOKENS_PER_EVALUATION)} tokens)`}
                 >
                   <SparkleIcon />
                   {evaluations.length > 0 ? "Re-evaluate" : "Evaluate"}

@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { evaluateClips, estimateEvaluationTokens } from "../evaluator";
+import { evaluateClips } from "../evaluator";
+import { estimateMaxTokens } from "../llm";
 
-describe("estimateEvaluationTokens", () => {
-  it("returns token estimate based on result count", () => {
-    expect(estimateEvaluationTokens(0)).toBe(400);
-    expect(estimateEvaluationTokens(5)).toBe(1400);
-    expect(estimateEvaluationTokens(10)).toBe(2400);
+describe("estimateMaxTokens", () => {
+  it("returns clamped token estimate based on item count", () => {
+    expect(estimateMaxTokens(0, 200)).toBe(4096);
+    expect(estimateMaxTokens(5, 200)).toBe(4096);
+    expect(estimateMaxTokens(25, 200)).toBe(5000);
+    expect(estimateMaxTokens(100, 200)).toBe(16384);
   });
 
-  it("rounds up to nearest integer", () => {
-    const result = estimateEvaluationTokens(3);
-    expect(Number.isInteger(result)).toBe(true);
+  it("always returns an integer", () => {
+    expect(Number.isInteger(estimateMaxTokens(3, 200))).toBe(true);
+    expect(Number.isInteger(estimateMaxTokens(7, 500))).toBe(true);
   });
 });
 
@@ -93,7 +95,7 @@ describe("evaluateClips", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.model).toBe("claude-sonnet-4-20250514");
-    expect(body.max_tokens).toBe(16384);
+    expect(body.max_tokens).toBe(4096);
     expect(body.messages[0].role).toBe("user");
     expect(body.messages[0].content).toContain("fox running footage");
     expect(body.system).toBeTruthy();

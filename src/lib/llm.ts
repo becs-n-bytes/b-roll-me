@@ -20,6 +20,15 @@ interface GeminiResponse {
   error?: { message: string };
 }
 
+export const TOKENS_PER_MOMENT = 500;
+export const TOKENS_PER_EVALUATION = 200;
+const MIN_OUTPUT_TOKENS = 4096;
+const MAX_OUTPUT_TOKENS = 16384;
+
+export function estimateMaxTokens(itemCount: number, tokensPerItem: number): number {
+  return Math.min(MAX_OUTPUT_TOKENS, Math.max(MIN_OUTPUT_TOKENS, itemCount * tokensPerItem));
+}
+
 function extractJson(text: string): string {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -33,7 +42,8 @@ async function callAnthropic(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  maxTokens: number,
 ): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -44,7 +54,7 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     }),
@@ -73,7 +83,8 @@ async function callOpenAiCompatible(
   systemPrompt: string,
   userMessage: string,
   providerLabel: string,
-  extraHeaders?: Record<string, string>
+  maxTokens: number,
+  extraHeaders?: Record<string, string>,
 ): Promise<string> {
   const response = await fetch(url, {
     method: "POST",
@@ -84,7 +95,7 @@ async function callOpenAiCompatible(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
@@ -112,7 +123,8 @@ async function callGemini(
   apiKey: string,
   model: string,
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  maxTokens: number,
 ): Promise<string> {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -122,7 +134,7 @@ async function callGemini(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
-        generationConfig: { maxOutputTokens: 16384 },
+        generationConfig: { maxOutputTokens: maxTokens },
       }),
     },
   );
@@ -152,37 +164,39 @@ export async function callLlm(
   userMessage: string,
   apiKey: string,
   model?: LlmModel,
+  maxTokens?: number,
   onChunk?: (text: string) => void,
 ): Promise<string> {
   const selectedModel = model ?? await getSettingFromDb("llm_model");
   const { provider, modelId } = parseModelValue(selectedModel);
+  const tokens = maxTokens ?? MAX_OUTPUT_TOKENS;
 
   switch (provider) {
     case "openai": {
       const key = await getSettingFromDb("openai_api_key") || apiKey;
-      if (onChunk) return streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenAI", onChunk);
+      if (onChunk) return streamOpenAiCompatible("https://api.openai.com/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenAI", tokens, onChunk);
       return callOpenAiCompatible(
         "https://api.openai.com/v1/chat/completions",
-        key, modelId, systemPrompt, userMessage, "OpenAI",
+        key, modelId, systemPrompt, userMessage, "OpenAI", tokens,
       );
     }
     case "openrouter": {
       const key = await getSettingFromDb("openrouter_api_key");
-      if (onChunk) return streamOpenAiCompatible("https://openrouter.ai/api/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenRouter", onChunk);
+      if (onChunk) return streamOpenAiCompatible("https://openrouter.ai/api/v1/chat/completions", key, modelId, systemPrompt, userMessage, "OpenRouter", tokens, onChunk);
       return callOpenAiCompatible(
         "https://openrouter.ai/api/v1/chat/completions",
-        key, modelId, systemPrompt, userMessage, "OpenRouter",
+        key, modelId, systemPrompt, userMessage, "OpenRouter", tokens,
       );
     }
     case "gemini": {
       const key = await getSettingFromDb("gemini_api_key");
-      if (onChunk) return streamGemini(key, modelId, systemPrompt, userMessage, onChunk);
-      return callGemini(key, modelId, systemPrompt, userMessage);
+      if (onChunk) return streamGemini(key, modelId, systemPrompt, userMessage, tokens, onChunk);
+      return callGemini(key, modelId, systemPrompt, userMessage, tokens);
     }
     default: {
       const key = await getSettingFromDb("anthropic_api_key") || apiKey;
-      if (onChunk) return streamAnthropic(key, modelId, systemPrompt, userMessage, onChunk);
-      return callAnthropic(key, modelId, systemPrompt, userMessage);
+      if (onChunk) return streamAnthropic(key, modelId, systemPrompt, userMessage, tokens, onChunk);
+      return callAnthropic(key, modelId, systemPrompt, userMessage, tokens);
     }
   }
 }
@@ -194,6 +208,7 @@ export async function analyzeScript(
   onChunk?: (text: string) => void,
 ): Promise<BRollMoment[]> {
   const maxMoments = Number(await getSettingFromDb("max_moments_per_analysis")) || 10;
+  const maxTokens = estimateMaxTokens(maxMoments, TOKENS_PER_MOMENT);
   const systemPrompt = `${BROLL_SYSTEM_PROMPT}\n\nIdentify at most ${maxMoments} moments. Prioritize the most impactful B-Roll opportunities.`;
 
   const text = await callLlm(
@@ -201,6 +216,7 @@ export async function analyzeScript(
     `Analyze this script for B-Roll opportunities:\n\n${scriptText}`,
     apiKey,
     model,
+    maxTokens,
     onChunk,
   );
 

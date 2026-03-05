@@ -56,6 +56,7 @@ export async function streamAnthropic(
   model: string,
   systemPrompt: string,
   userMessage: string,
+  maxTokens: number,
   onChunk: (text: string) => void,
 ): Promise<string> {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -67,7 +68,7 @@ export async function streamAnthropic(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
       stream: true,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
@@ -102,6 +103,7 @@ export async function streamOpenAiCompatible(
   systemPrompt: string,
   userMessage: string,
   providerLabel: string,
+  maxTokens: number,
   onChunk: (text: string) => void,
   extraHeaders?: Record<string, string>,
 ): Promise<string> {
@@ -114,7 +116,7 @@ export async function streamOpenAiCompatible(
     },
     body: JSON.stringify({
       model,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
@@ -146,6 +148,7 @@ export async function streamGemini(
   model: string,
   systemPrompt: string,
   userMessage: string,
+  maxTokens: number,
   onChunk: (text: string) => void,
 ): Promise<string> {
   const response = await fetch(
@@ -156,7 +159,7 @@ export async function streamGemini(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: userMessage }] }],
-        generationConfig: { maxOutputTokens: 16384 },
+        generationConfig: { maxOutputTokens: maxTokens },
       }),
     },
   );
