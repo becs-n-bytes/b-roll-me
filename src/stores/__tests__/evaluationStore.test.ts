@@ -130,6 +130,7 @@ describe("evaluationStore", () => {
           expect.objectContaining({ videoId: "vid-1", videoTitle: "Test Video" }),
         ]),
         "api-key",
+        undefined,
       );
     });
 

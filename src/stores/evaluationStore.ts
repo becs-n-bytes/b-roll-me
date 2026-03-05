@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { EvaluatedClip, SearchResult, TranscriptMatch } from "../types";
+import type { EvaluatedClip, SearchResult, TranscriptMatch, LlmModel } from "../types";
 import { getDb } from "../lib/database";
 import { evaluateClips } from "../lib/evaluator";
 
@@ -16,6 +16,7 @@ interface EvaluationState {
     suggestionDescriptions: string[],
     results: SearchResult[],
     apiKey: string,
+    model?: LlmModel,
   ) => Promise<void>;
   toggleSort: () => void;
 }
@@ -50,6 +51,7 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
     suggestionDescriptions,
     results,
     apiKey,
+    model?,
   ) => {
     set((s) => ({
       evaluatingMoments: new Set(s.evaluatingMoments).add(momentId),
@@ -76,6 +78,7 @@ export const useEvaluationStore = create<EvaluationState>((set, get) => ({
         suggestionDescriptions,
         inputs,
         apiKey,
+        model,
       );
 
       const db = await getDb();

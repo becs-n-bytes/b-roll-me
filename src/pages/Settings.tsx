@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { useSettingsStore } from "../stores/settingsStore";
 import type { VideoFormat, Resolution } from "../types";
@@ -236,6 +236,11 @@ function TextInputField({
   );
 }
 
+const LLM_FEATURES: { key: "analysis_model_override" | "evaluation_model_override"; label: string; description: string }[] = [
+  { key: "analysis_model_override", label: "Script Analysis", description: "Reads your script and identifies B-Roll moments. Benefits from stronger reasoning." },
+  { key: "evaluation_model_override", label: "Clip Evaluation", description: "Scores search results for relevance. Structured scoring works well with faster models." },
+];
+
 const PROVIDER_LABELS: Record<LlmProvider, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
@@ -247,54 +252,433 @@ function ModelSelector({
   value,
   models,
   loading,
+  configuredProviders,
   onRefresh,
   onChange,
 }: {
   value: string;
   models: ModelOption[];
   loading: boolean;
+  configuredProviders: Set<LlmProvider>;
   onRefresh: () => void;
   onChange: (value: string) => void;
 }) {
-  const grouped = models.reduce<Record<string, ModelOption[]>>((acc, m) => {
-    (acc[m.provider] ??= []).push(m);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [providerFilter, setProviderFilter] = useState<Set<LlmProvider>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const initialFilterApplied = useRef(false);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (initialFilterApplied.current || models.length === 0) return;
+    const keyed = new Set<LlmProvider>();
+    for (const p of configuredProviders) {
+      if (models.some((m) => m.provider === p)) keyed.add(p);
+    }
+    if (keyed.size > 0) setProviderFilter(keyed);
+    initialFilterApplied.current = true;
+  }, [models, configuredProviders]);
+
+  const providerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of models) {
+      counts[m.provider] = (counts[m.provider] ?? 0) + 1;
+    }
+    return counts;
+  }, [models]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return models.filter((m) => {
+      if (providerFilter.size > 0 && !providerFilter.has(m.provider)) return false;
+      if (!q) return true;
+      return (
+        m.displayName.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        PROVIDER_LABELS[m.provider].toLowerCase().includes(q)
+      );
+    });
+  }, [models, search, providerFilter]);
+
+  const grouped = useMemo(() => {
+    const acc: Record<string, ModelOption[]> = {};
+    for (const m of filtered) {
+      (acc[m.provider] ??= []).push(m);
+    }
     return acc;
-  }, {});
+  }, [filtered]);
+
+  const toggleProvider = (p: LlmProvider) => {
+    setProviderFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setProviderFilter(new Set());
+  };
+
+  const selectedModel = models.find((m) => toModelValue(m.provider, m.id) === value);
+  const displayLabel = selectedModel?.displayName ?? parseModelValue(value).modelId;
 
   return (
-    <div className="flex items-center justify-between py-3 gap-3">
-      <label className="text-sm text-neutral-300 shrink-0">LLM model</label>
-      <div className="flex items-center gap-2">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="max-w-xs px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-neutral-200 text-sm focus:outline-none focus:border-blue-500 transition-colors"
-        >
-          {models.length === 0 && !loading && (
-            <option value={value}>{parseModelValue(value).modelId}</option>
-          )}
-          {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((provider) => {
-            const group = grouped[provider];
-            if (!group?.length) return null;
-            return (
-              <optgroup key={provider} label={PROVIDER_LABELS[provider]}>
-                {group.map((m) => (
-                  <option key={toModelValue(m.provider, m.id)} value={toModelValue(m.provider, m.id)}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </optgroup>
-            );
-          })}
-        </select>
+    <div className="py-3">
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-sm text-neutral-300 shrink-0">LLM model</label>
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="px-3 py-2 rounded-lg text-xs font-medium bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-600 text-neutral-300 transition-colors shrink-0"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-600 text-neutral-300 transition-colors shrink-0"
         >
-          {loading ? "Loading..." : "Refresh"}
+          {loading ? "Loading..." : "Refresh Models"}
         </button>
       </div>
+      <div ref={containerRef} className="relative">
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(!open);
+            if (!open) setTimeout(() => inputRef.current?.focus(), 0);
+          }}
+          className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg bg-neutral-800 border border-neutral-700 text-sm text-left transition-colors hover:border-neutral-600 focus:outline-none focus:border-blue-500"
+        >
+          <span className="text-neutral-200 truncate">{displayLabel}</span>
+          <span className="text-neutral-500 ml-2 shrink-0">
+            {selectedModel && (
+              <span className="text-xs text-neutral-500 mr-2">{PROVIDER_LABELS[selectedModel.provider]}</span>
+            )}
+            <svg className="w-4 h-4 inline-block" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+            </svg>
+          </span>
+        </button>
+
+        {open && (
+          <div className="absolute z-50 mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 shadow-xl shadow-black/40 overflow-hidden">
+            <div className="p-2 border-b border-neutral-700">
+              <input
+                ref={inputRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search models..."
+                className="w-full px-3 py-2 rounded-md bg-neutral-900 border border-neutral-700 text-neutral-200 placeholder-neutral-600 text-sm focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 px-2 py-2 border-b border-neutral-700">
+              {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((p) => {
+                const count = providerCounts[p] ?? 0;
+                const active = providerFilter.has(p);
+                const dimmed = count === 0;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={dimmed}
+                    onClick={() => toggleProvider(p)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      dimmed
+                        ? "bg-neutral-900/50 text-neutral-700 border border-neutral-800 cursor-not-allowed"
+                        : active
+                          ? "bg-blue-600/20 text-blue-400 border border-blue-500/40"
+                          : "bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-neutral-600"
+                    }`}
+                  >
+                    {PROVIDER_LABELS[p]}
+                    <span className={`ml-1.5 ${dimmed ? "text-neutral-700" : active ? "text-blue-500/70" : "text-neutral-600"}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+              {providerFilter.size > 0 && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="px-2 py-1 rounded-md text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-64 overflow-y-auto">
+              {filtered.length === 0 && (
+                <div className="px-3 py-4 text-sm text-neutral-500 text-center">
+                  {models.length === 0 ? "No models loaded" : "No matches"}
+                </div>
+              )}
+              {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((provider) => {
+                const group = grouped[provider];
+                if (!group?.length) return null;
+                return (
+                  <div key={provider}>
+                    <div className="px-3 py-1.5 text-xs font-semibold text-neutral-500 uppercase tracking-wider bg-neutral-800/50 sticky top-0">
+                      {PROVIDER_LABELS[provider]}
+                    </div>
+                    {group.map((m) => {
+                      const mv = toModelValue(m.provider, m.id);
+                      const selected = mv === value;
+                      return (
+                        <button
+                          key={mv}
+                          type="button"
+                          onClick={() => {
+                            onChange(mv);
+                            setOpen(false);
+                            setSearch("");
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            selected
+                              ? "bg-blue-600/15 text-blue-300"
+                              : "text-neutral-300 hover:bg-neutral-700/50"
+                          }`}
+                        >
+                          <span className="block truncate">{m.displayName}</span>
+                          {m.displayName !== m.id && (
+                            <span className="block text-xs text-neutral-500 truncate">{m.id}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FeatureModelOverride({
+  feature,
+  value,
+  defaultModel,
+  models,
+  onChange,
+}: {
+  feature: { key: string; label: string; description: string };
+  value: string;
+  defaultModel: string;
+  models: ModelOption[];
+  onChange: (value: string) => void;
+}) {
+  const enabled = value !== "";
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [providerFilter, setProviderFilter] = useState<Set<LlmProvider>>(new Set());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const providerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of models) counts[m.provider] = (counts[m.provider] ?? 0) + 1;
+    return counts;
+  }, [models]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return models.filter((m) => {
+      if (providerFilter.size > 0 && !providerFilter.has(m.provider)) return false;
+      if (!q) return true;
+      return (
+        m.displayName.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        PROVIDER_LABELS[m.provider].toLowerCase().includes(q)
+      );
+    });
+  }, [models, search, providerFilter]);
+
+  const grouped = useMemo(() => {
+    const acc: Record<string, ModelOption[]> = {};
+    for (const m of filtered) (acc[m.provider] ??= []).push(m);
+    return acc;
+  }, [filtered]);
+
+  const toggleProvider = (p: LlmProvider) => {
+    setProviderFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  };
+
+  const activeValue = enabled ? value : defaultModel;
+  const selectedModel = models.find((m) => toModelValue(m.provider, m.id) === activeValue);
+  const displayLabel = selectedModel?.displayName ?? parseModelValue(activeValue).modelId;
+
+  return (
+    <div className="py-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            onClick={() => onChange(enabled ? "" : defaultModel)}
+            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
+              enabled ? "bg-blue-600" : "bg-neutral-700"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                enabled ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
+          <div>
+            <span className="text-sm text-neutral-300">{feature.label}</span>
+            <p className="text-xs text-neutral-600">{feature.description}</p>
+          </div>
+        </div>
+      </div>
+
+      {enabled && (
+        <div ref={containerRef} className="relative mt-2 ml-12">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(!open);
+              if (!open) setTimeout(() => inputRef.current?.focus(), 0);
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-sm text-left transition-colors hover:border-neutral-600 focus:outline-none focus:border-blue-500"
+          >
+            <span className="text-neutral-200 truncate text-xs">{displayLabel}</span>
+            <span className="text-neutral-500 ml-2 shrink-0">
+              {selectedModel && (
+                <span className="text-xs text-neutral-500 mr-1">{PROVIDER_LABELS[selectedModel.provider]}</span>
+              )}
+              <svg className="w-3.5 h-3.5 inline-block" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+              </svg>
+            </span>
+          </button>
+
+          {open && (
+            <div className="absolute z-50 mt-1 w-full rounded-lg bg-neutral-800 border border-neutral-700 shadow-xl shadow-black/40 overflow-hidden">
+              <div className="p-2 border-b border-neutral-700">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search models..."
+                  className="w-full px-3 py-1.5 rounded-md bg-neutral-900 border border-neutral-700 text-neutral-200 placeholder-neutral-600 text-xs focus:outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-b border-neutral-700">
+                {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((p) => {
+                  const count = providerCounts[p] ?? 0;
+                  const active = providerFilter.has(p);
+                  const dimmed = count === 0;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      disabled={dimmed}
+                      onClick={() => toggleProvider(p)}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                        dimmed
+                          ? "bg-neutral-900/50 text-neutral-700 border border-neutral-800 cursor-not-allowed"
+                          : active
+                            ? "bg-blue-600/20 text-blue-400 border border-blue-500/40"
+                            : "bg-neutral-900 text-neutral-400 border border-neutral-700 hover:border-neutral-600"
+                      }`}
+                    >
+                      {PROVIDER_LABELS[p]}
+                      <span className={`ml-1 ${dimmed ? "text-neutral-700" : active ? "text-blue-500/70" : "text-neutral-600"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+                {providerFilter.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setProviderFilter(new Set())}
+                    className="px-1.5 py-0.5 rounded text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-52 overflow-y-auto">
+                {filtered.length === 0 && (
+                  <div className="px-3 py-3 text-xs text-neutral-500 text-center">
+                    {models.length === 0 ? "No models loaded" : "No matches"}
+                  </div>
+                )}
+                {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((provider) => {
+                  const group = grouped[provider];
+                  if (!group?.length) return null;
+                  return (
+                    <div key={provider}>
+                      <div className="px-3 py-1 text-xs font-semibold text-neutral-500 uppercase tracking-wider bg-neutral-800/50 sticky top-0">
+                        {PROVIDER_LABELS[provider]}
+                      </div>
+                      {group.map((m) => {
+                        const mv = toModelValue(m.provider, m.id);
+                        const selected = mv === value;
+                        return (
+                          <button
+                            key={mv}
+                            type="button"
+                            onClick={() => {
+                              onChange(mv);
+                              setOpen(false);
+                              setSearch("");
+                            }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                              selected
+                                ? "bg-blue-600/15 text-blue-300"
+                                : "text-neutral-300 hover:bg-neutral-700/50"
+                            }`}
+                          >
+                            <span className="block truncate">{m.displayName}</span>
+                            {m.displayName !== m.id && (
+                              <span className="block text-xs text-neutral-500 truncate">{m.id}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -330,6 +714,15 @@ export default function Settings() {
       refreshModels();
     }
   }, [loaded, refreshModels]);
+
+  const configuredProviders = useMemo(() => {
+    const set = new Set<LlmProvider>();
+    if (settings.anthropic_api_key) set.add("anthropic");
+    if (settings.openai_api_key) set.add("openai");
+    if (settings.openrouter_api_key) set.add("openrouter");
+    if (settings.gemini_api_key) set.add("gemini");
+    return set;
+  }, [settings.anthropic_api_key, settings.openai_api_key, settings.openrouter_api_key, settings.gemini_api_key]);
 
   const testAnthropicKey = async () => {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -506,9 +899,29 @@ export default function Settings() {
             value={settings.llm_model}
             models={models}
             loading={modelsLoading}
+            configuredProviders={configuredProviders}
             onRefresh={refreshModels}
             onChange={(v) => saveSetting("llm_model", v)}
           />
+          <div className="py-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm text-neutral-300">Per-feature model overrides</span>
+              <span className="text-xs text-neutral-600">Use different models for each AI feature</span>
+            </div>
+            <div className="mt-1 rounded-lg border border-neutral-800 bg-neutral-900/50">
+              {LLM_FEATURES.map((feature) => (
+                <div key={feature.key} className="border-b border-neutral-800 last:border-b-0 px-3">
+                  <FeatureModelOverride
+                    feature={feature}
+                    value={settings[feature.key]}
+                    defaultModel={settings.llm_model}
+                    models={models}
+                    onChange={(v) => saveSetting(feature.key, v)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
           <NumberField
             label="Max moments per analysis"
             value={settings.max_moments_per_analysis}

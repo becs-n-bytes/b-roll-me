@@ -8,7 +8,7 @@ Instructions for AI agents working on this codebase.
 # Build & verify
 npx tsc --noEmit                  # TypeScript check (ignore mocks.ts errors)
 npx vite build                    # Frontend production build
-npm test                          # 214 Vitest tests
+npm test                          # 216 Vitest tests
 source "$HOME/.cargo/env" && cd src-tauri && cargo test  # 7 Rust tests
 
 # Development
@@ -62,6 +62,19 @@ import { fetch } from "@tauri-apps/plugin-http";
 
 ### LLM Integration
 Four providers are supported: Anthropic, OpenAI, OpenRouter, and Google Gemini. Models are stored as `provider:model_id` strings (e.g., `anthropic:claude-sonnet-4-20250514`, `openai:gpt-4o`, `openrouter:anthropic/claude-3.5-sonnet`, `gemini:gemini-2.5-flash`). The `callLlm()` function in `src/lib/llm.ts` uses `parseModelValue()` to split the provider and route accordingly. The model selector in Settings dynamically fetches available models from all configured provider APIs. Functions that call the LLM accept an optional `model?: string` parameter; if omitted, the user's configured model from settings is used.
+
+### Per-Feature Model Overrides
+Users can override the default model for each LLM feature individually via Settings > Analysis Preferences. Two features currently use LLM calls:
+
+1. **Script Analysis** (`analysis_model_override`) — `analyzeScript()` in `src/lib/llm.ts`
+2. **Clip Evaluation** (`evaluation_model_override`) — `evaluateClips()` in `src/lib/evaluator.ts`
+
+When adding a new LLM feature, you must:
+1. Add a new `{feature}_model_override` key to `AppSettings` in `src/types/index.ts` (default: `""`)
+2. Add the default to `DEFAULTS` in `src/stores/settingsStore.ts`
+3. Add an entry to the `LLM_FEATURES` array in `src/pages/Settings.tsx`
+4. In the call site, read the override: `const model = await getSettingFromDb("{feature}_model_override") || undefined`
+5. Pass `model` through to `callLlm()` or the feature's wrapper function
 
 ### Tauri v2 Specifics
 

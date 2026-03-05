@@ -8,6 +8,7 @@ import { analyzeScript } from "../lib/llm";
 import { estimateEvaluationTokens } from "../lib/evaluator";
 import { ensureOutputDir } from "../lib/downloader";
 import { getDb } from "../lib/database";
+import { getSettingFromDb } from "../stores/settingsStore";
 import { downloadDir } from "@tauri-apps/api/path";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useEvaluationStore } from "../stores/evaluationStore";
@@ -721,7 +722,8 @@ export default function ProjectView() {
       const db = await getDb();
       const rows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["anthropic_api_key"]);
       if (!rows.length || !rows[0].value) throw new Error("No API key configured. Add your Anthropic key in Settings.");
-      const brollMoments = await analyzeScript(scriptText, rows[0].value);
+      const analysisModel = await getSettingFromDb("analysis_model_override") || undefined;
+      const brollMoments = await analyzeScript(scriptText, rows[0].value, analysisModel);
       await saveMoments(id, brollMoments);
       analysisScriptRef.current = scriptText;
       setScriptChangedSinceAnalysis(false);
@@ -785,7 +787,8 @@ export default function ProjectView() {
     const results = searchResults.get(momentId);
     if (!results || results.length === 0) return;
     const suggestions: BRollSuggestion[] = moment.suggestions_json ? JSON.parse(moment.suggestions_json) : [];
-    await evaluateMoment(momentId, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, rows[0].value);
+    const evalModel = await getSettingFromDb("evaluation_model_override") || undefined;
+    await evaluateMoment(momentId, moment.script_excerpt, moment.editorial_note ?? "", suggestions.map((s) => s.description), results, rows[0].value, evalModel);
   };
 
   const handlePreview = (result: SearchResult, momentId: string, momentIndex: number) => {
@@ -821,7 +824,8 @@ export default function ProjectView() {
     try {
       setPipelineStep("analyzing");
       setPipelineProgress({ current: 0, total: 1, detail: "Analyzing script..." });
-      const brollMoments = await analyzeScript(scriptText, apiKey);
+      const pipelineAnalysisModel = await getSettingFromDb("analysis_model_override") || undefined;
+      const brollMoments = await analyzeScript(scriptText, apiKey, pipelineAnalysisModel);
       await saveMoments(id, brollMoments);
       analysisScriptRef.current = scriptText;
       setScriptChangedSinceAnalysis(false);
@@ -849,6 +853,7 @@ export default function ProjectView() {
       if (pipelineCancelledRef.current) { setPipelineStep("idle"); return; }
 
       setPipelineStep("evaluating");
+      const pipelineEvalModel = await getSettingFromDb("evaluation_model_override") || undefined;
       const latestSearch = useSearchStore.getState().results;
       const momentsWithResults = latestMoments.filter((m) => (latestSearch.get(m.id) ?? []).length > 0);
       for (let i = 0; i < momentsWithResults.length; i++) {
@@ -858,7 +863,7 @@ export default function ProjectView() {
         if (!results || results.length === 0) continue;
         setPipelineProgress({ current: i + 1, total: momentsWithResults.length, detail: `Evaluating moment ${i + 1} of ${momentsWithResults.length}...` });
         const suggestions: BRollSuggestion[] = m.suggestions_json ? JSON.parse(m.suggestions_json) : [];
-        await evaluateMoment(m.id, m.script_excerpt, m.editorial_note ?? "", suggestions.map((s) => s.description), results, apiKey);
+        await evaluateMoment(m.id, m.script_excerpt, m.editorial_note ?? "", suggestions.map((s) => s.description), results, apiKey, pipelineEvalModel);
       }
 
       setPipelineStep("complete");

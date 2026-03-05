@@ -13,6 +13,8 @@ const DEFAULTS: AppSettings = {
   resolution: "best",
   max_concurrent_downloads: 2,
   llm_model: "anthropic:claude-sonnet-4-20250514",
+  analysis_model_override: "",
+  evaluation_model_override: "",
   max_moments_per_analysis: 10,
   theme: "dark",
   check_for_updates: true,

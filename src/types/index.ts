@@ -77,6 +77,8 @@ export interface AppSettings {
   resolution: Resolution;
   max_concurrent_downloads: number;
   llm_model: LlmModel;
+  analysis_model_override: string;
+  evaluation_model_override: string;
   max_moments_per_analysis: number;
   theme: "dark" | "light";
   check_for_updates: boolean;

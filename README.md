@@ -80,7 +80,7 @@ The Tauri dev command compiles the Rust backend, starts Vite on port 1420, and o
 ## Testing
 
 ```bash
-# Run all frontend tests (214 tests across 15 files)
+# Run all frontend tests (216 tests across 15 files)
 npm test
 
 # Watch mode

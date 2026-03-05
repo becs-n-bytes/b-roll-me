@@ -20,7 +20,7 @@ Script -> [M1: Analyze] -> Moments -> [M2: Search+Transcript] -> Results -> [M3:
 
 **`src/pages/Dashboard.tsx`** - Project list/grid. CRUD operations via `projectStore`. Each project card shows name and timestamps. "New Project" button opens `NewProjectDialog`.
 
-**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, OpenRouter, Gemini, YouTube with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (dynamic LLM model selector via `ModelSelector` component that fetches models from all configured provider APIs, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
+**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, OpenRouter, Gemini, YouTube with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (dynamic LLM model selector via `ModelSelector` component that fetches models from all configured provider APIs, per-feature model overrides via `FeatureModelOverride` components driven by `LLM_FEATURES` array, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
 
 #### Components
 
@@ -143,6 +143,18 @@ Test files are colocated in `__tests__/` directories next to their source:
 - YouTube: 403 + quotaExceeded -> "Quota exceeded", 400 -> "Invalid key"
 - Downloads: yt-dlp exit code != 0 -> error message, signal -> "cancelled"
 - All errors surface in the UI via store error state
+
+### Per-Feature Model Overrides
+Each LLM feature can use a different model via override settings. The pattern:
+- Settings key: `{feature}_model_override` (empty string = use default `llm_model`)
+- UI: Toggle + searchable dropdown per feature in Settings > Analysis Preferences
+- Wiring: Call site reads override via `getSettingFromDb("{feature}_model_override") || undefined`, passes to the LLM function
+
+Current features with overrides:
+1. **Script Analysis** — `analysis_model_override` — `analyzeScript()` in `llm.ts`, called from ProjectView
+2. **Clip Evaluation** — `evaluation_model_override` — `evaluateClips()` in `evaluator.ts`, called via `evaluationStore.evaluateMoment()`
+
+**When adding a new LLM feature**: Add override key to `AppSettings`, `DEFAULTS`, `LLM_FEATURES` array in Settings.tsx, and wire the call site. See CLAUDE.md for the full checklist.
 
 ### Concurrent Operations
 - Downloads: controlled by `max_concurrent_downloads` setting (1-5)

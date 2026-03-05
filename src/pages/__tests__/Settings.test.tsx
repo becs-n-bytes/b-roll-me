@@ -121,7 +121,7 @@ describe("Settings", () => {
     });
   });
 
-  it("shows fetched models grouped by provider", async () => {
+  it("shows selected model display name on dropdown trigger", async () => {
     mockFetchAllModels.mockResolvedValue([
       { provider: "anthropic", id: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4" },
       { provider: "openai", id: "gpt-4o", displayName: "gpt-4o" },
@@ -129,14 +129,40 @@ describe("Settings", () => {
     render(<Settings />);
     await waitFor(() => {
       expect(screen.getByText("Claude Sonnet 4")).toBeInTheDocument();
-      expect(screen.getByText("gpt-4o")).toBeInTheDocument();
     });
   });
 
-  it("shows Refresh button for model selector", async () => {
+  it("shows models grouped by provider when dropdown opened", async () => {
+    mockFetchAllModels.mockResolvedValue([
+      { provider: "anthropic", id: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4" },
+      { provider: "openai", id: "gpt-4o", displayName: "gpt-4o" },
+    ]);
     render(<Settings />);
     await waitFor(() => {
-      expect(screen.getByText("Refresh")).toBeInTheDocument();
+      expect(screen.getByText("Claude Sonnet 4")).toBeInTheDocument();
+    });
+    screen.getByText("Claude Sonnet 4").click();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Search models...")).toBeInTheDocument();
+      expect(screen.getAllByText("Anthropic").length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText("OpenAI").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("gpt-4o").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("shows Refresh Models button", async () => {
+    render(<Settings />);
+    await waitFor(() => {
+      expect(screen.getByText("Refresh Models")).toBeInTheDocument();
+    });
+  });
+
+  it("renders per-feature model override toggles", async () => {
+    render(<Settings />);
+    await waitFor(() => {
+      expect(screen.getByText("Per-feature model overrides")).toBeInTheDocument();
+      expect(screen.getByText("Script Analysis")).toBeInTheDocument();
+      expect(screen.getByText("Clip Evaluation")).toBeInTheDocument();
     });
   });
 
