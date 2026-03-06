@@ -67,21 +67,16 @@ describe("Settings", () => {
     expect(screen.getByText("Google Gemini API Key")).toBeInTheDocument();
   });
 
-  it("shows YouTube API Key input", () => {
-    render(<Settings />);
-    expect(screen.getByText("YouTube Data API Key")).toBeInTheDocument();
-  });
-
   it("shows Test button for each API key", () => {
     render(<Settings />);
     const testButtons = screen.getAllByText("Test");
-    expect(testButtons.length).toBe(5);
+    expect(testButtons.length).toBe(4);
   });
 
   it("shows Save button for each API key", () => {
     render(<Settings />);
     const saveButtons = screen.getAllByText("Save");
-    expect(saveButtons.length).toBe(5);
+    expect(saveButtons.length).toBe(4);
   });
 
   it("renders Download Preferences section", () => {
@@ -192,6 +187,6 @@ describe("Settings", () => {
   it("shows not configured state for empty keys", () => {
     render(<Settings />);
     const notConfigured = screen.getAllByText("Not configured");
-    expect(notConfigured.length).toBe(5);
+    expect(notConfigured.length).toBe(4);
   });
 });

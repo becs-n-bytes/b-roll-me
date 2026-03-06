@@ -1,21 +1,7 @@
 import { fetch } from "@tauri-apps/plugin-http";
+import { getInnertube } from "./innertube";
 import { getDb } from "./database";
 import type { TranscriptSegment, TranscriptMatch } from "../types";
-
-const ANDROID_UA = "com.google.android.youtube/19.09.37 (Linux; U; Android 13; en_US) gzip";
-
-interface CaptionTrack {
-  baseUrl: string;
-  languageCode: string;
-}
-
-interface PlayerResponse {
-  captions?: {
-    playerCaptionsTracklistRenderer?: {
-      captionTracks?: CaptionTrack[];
-    };
-  };
-}
 
 interface TimedTextEvent {
   segs?: { utf8: string }[];
@@ -25,42 +11,6 @@ interface TimedTextEvent {
 
 interface TimedTextResponse {
   events?: TimedTextEvent[];
-}
-
-async function getCaptionUrl(videoId: string, lang = "en"): Promise<string | null> {
-  const response = await fetch("https://www.youtube.com/youtubei/v1/player", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": ANDROID_UA,
-    },
-    body: JSON.stringify({
-      context: {
-        client: {
-          clientName: "ANDROID",
-          clientVersion: "19.09.37",
-          androidSdkVersion: 33,
-          hl: lang,
-          gl: "US",
-        },
-      },
-      videoId,
-      contentCheckOk: true,
-      racyCheckOk: true,
-    }),
-  });
-
-  if (!response.ok) return null;
-
-  const data = (await response.json()) as PlayerResponse;
-  const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-  if (!tracks?.length) return null;
-
-  const track = tracks.find((t) => t.languageCode === lang) ?? tracks[0];
-  if (!track?.baseUrl) return null;
-
-  const url = track.baseUrl.replace(/([?&])fmt=[^&]*/, "$1fmt=json3");
-  return url === track.baseUrl ? `${track.baseUrl}&fmt=json3` : url;
 }
 
 export async function fetchTranscript(videoId: string): Promise<TranscriptSegment[] | null> {
@@ -74,20 +24,22 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
     return JSON.parse(cached[0].transcript_json);
   }
 
-  const captionUrl = await getCaptionUrl(videoId);
-  if (!captionUrl) return null;
+  const yt = await getInnertube();
+  const info = await yt.getBasicInfo(videoId, { client: "ANDROID" });
+  const tracks = info.captions?.caption_tracks;
+  if (!tracks?.length) return null;
 
-  let safeUrl: string;
-  try {
-    safeUrl = new URL(captionUrl).toString();
-  } catch {
-    return null;
-  }
+  const track =
+    tracks.find((t) => t.language_code === "en" && t.kind !== "asr") ??
+    tracks.find((t) => t.language_code === "en") ??
+    tracks[0];
 
-  const response = await fetch(safeUrl, {
-    headers: { "User-Agent": ANDROID_UA },
-  });
+  if (!track?.base_url) return null;
 
+  const captionUrl = new URL(track.base_url);
+  captionUrl.searchParams.set("fmt", "json3");
+
+  const response = await fetch(captionUrl.toString());
   if (!response.ok) return null;
 
   const data = (await response.json()) as TimedTextResponse;
@@ -106,7 +58,7 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
 
   await db.execute(
     "INSERT OR REPLACE INTO transcript_cache (video_id, transcript_json, language) VALUES ($1, $2, $3)",
-    [videoId, JSON.stringify(segments), "en"]
+    [videoId, JSON.stringify(segments), track.language_code ?? "en"]
   );
 
   return segments;

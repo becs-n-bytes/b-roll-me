@@ -71,7 +71,6 @@ export interface AppSettings {
   openai_api_key: string;
   openrouter_api_key: string;
   gemini_api_key: string;
-  youtube_api_key: string;
   default_output_dir: string;
   video_format: VideoFormat;
   resolution: Resolution;

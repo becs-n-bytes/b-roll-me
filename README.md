@@ -25,10 +25,11 @@ There's also an "Auto-Analyze" button that runs steps 1-3 as a single pipeline.
 The app does not ship with API keys. You provide your own in Settings:
 
 - **Anthropic API Key** - For script analysis and clip evaluation. Get one at [console.anthropic.com](https://console.anthropic.com/).
-- **YouTube Data API Key** - For searching YouTube. Get one from [Google Cloud Console](https://console.cloud.google.com/apis/credentials) with the YouTube Data API v3 enabled.
 - **OpenAI API Key** (optional) - For GPT-4o and other OpenAI models.
 - **OpenRouter API Key** (optional) - Access to many models through a single key. Get one at [openrouter.ai](https://openrouter.ai/).
 - **Google Gemini API Key** (optional) - For Gemini Flash and Pro models. Get one at [aistudio.google.com](https://aistudio.google.com/).
+
+YouTube search and transcript fetching use the `youtubei.js` library (InnerTube protocol) and require no API key.
 
 ## Setup
 
@@ -80,7 +81,7 @@ The Tauri dev command compiles the Rust backend, starts Vite on port 1420, and o
 ## Testing
 
 ```bash
-# Run all frontend tests (216 tests across 15 files)
+# Run all frontend tests (233 tests across 16 files)
 npm test
 
 # Watch mode
@@ -110,13 +111,13 @@ User pastes script
   [B-Roll Moments]  stored in SQLite "moments" table
        |
        v
-  [Search YouTube]  ------>  YouTube Data API v3 (via plugin-http)
+  [Search YouTube]  ------>  youtubei.js InnerTube (no API key)
        |
        v
   [Search Results]  stored in "search_results" table
        |
        v
-  [Fetch Transcripts]  ---->  YouTube transcript endpoint
+  [Fetch Transcripts]  ---->  youtubei.js getBasicInfo + TimedText API
        |
        v
   [Evaluate Clips]  ------>  Anthropic/OpenAI API (via plugin-http)
@@ -164,7 +165,7 @@ The Rust backend is thin. It handles:
 
 Three Tauri commands are exposed to the frontend: `download_clip`, `cancel_download`, `ensure_output_dir`.
 
-All API calls (Anthropic, OpenAI, YouTube) happen from the frontend using `@tauri-apps/plugin-http`, which provides a `fetch()` that bypasses CORS restrictions.
+All API calls (Anthropic, OpenAI, YouTube InnerTube) happen from the frontend using `@tauri-apps/plugin-http`, which provides a `fetch()` that bypasses CORS restrictions.
 
 ### Database Schema
 
@@ -211,8 +212,9 @@ b-roll-me/
       models.ts                 # Model discovery from provider APIs
       llm.ts                    # LLM abstraction (4-provider routing)
       prompts.ts                # System prompts for analysis and evaluation
-      youtube.ts                # YouTube Data API v3 search
-      transcript.ts             # YouTube transcript fetching + search
+      innertube.ts              # youtubei.js InnerTube singleton
+      youtube.ts                # YouTube search via youtubei.js
+      transcript.ts             # YouTube transcript fetching + keyword search
       evaluator.ts              # Clip evaluation via LLM
       downloader.ts             # Tauri invoke wrappers for yt-dlp
     test/

@@ -30,7 +30,6 @@ describe("settingsStore", () => {
     expect(settings.openai_api_key).toBe("");
     expect(settings.openrouter_api_key).toBe("");
     expect(settings.gemini_api_key).toBe("");
-    expect(settings.youtube_api_key).toBe("");
     expect(settings.default_output_dir).toBe("");
     expect(settings.video_format).toBe("mp4");
     expect(settings.resolution).toBe("best");

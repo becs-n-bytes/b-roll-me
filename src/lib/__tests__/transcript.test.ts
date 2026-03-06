@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fetchTranscript, searchTranscript } from "../transcript";
 import type { TranscriptSegment } from "../../types";
 
+vi.mock("../innertube");
+
+const { getInnertube } = await import("../innertube");
+const mockGetInnertube = vi.mocked(getInnertube);
+
 describe("searchTranscript", () => {
   const makeSegment = (text: string, start: number, duration = 5): TranscriptSegment => ({
     text,
@@ -138,17 +143,12 @@ describe("searchTranscript", () => {
   });
 });
 
-const CAPTION_BASE_URL = "https://www.youtube.com/api/timedtext?v=test&lang=en&pot=TOKEN123&fmt=json3";
+const CAPTION_BASE_URL = "https://www.youtube.com/api/timedtext?v=test&lang=en&fmt=json3";
 
-function makePlayerResponse(baseUrl = CAPTION_BASE_URL, lang = "en") {
+function makeMockInnertube(captionTracks: { base_url: string; language_code: string; kind?: string }[] | null) {
   return {
-    ok: true,
-    json: () => Promise.resolve({
-      captions: {
-        playerCaptionsTracklistRenderer: {
-          captionTracks: [{ baseUrl, languageCode: lang }],
-        },
-      },
+    getBasicInfo: vi.fn().mockResolvedValue({
+      captions: captionTracks ? { caption_tracks: captionTracks } : undefined,
     }),
   };
 }
@@ -183,61 +183,26 @@ describe("fetchTranscript", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("fetches via InnerTube player then caption URL", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "hello world" }], tStartMs: 1000, dDurationMs: 5000 },
-      ]));
+  it("fetches via getBasicInfo then caption URL", async () => {
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "hello world" }], tStartMs: 1000, dDurationMs: 5000 },
+    ]));
 
     const result = await fetchTranscript("video1");
     expect(result).toEqual([{ text: "hello world", start: 1, duration: 5 }]);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenNthCalledWith(1,
-      "https://www.youtube.com/youtubei/v1/player",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(yt.getBasicInfo).toHaveBeenCalledWith("video1", { client: "ANDROID" });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("sends User-Agent header to both requests", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
-
-    await fetchTranscript("vid-ua");
-    const playerHeaders = mockFetch.mock.calls[0][1].headers;
-    const captionHeaders = mockFetch.mock.calls[1][1].headers;
-    expect(playerHeaders["User-Agent"]).toContain("android.youtube");
-    expect(captionHeaders["User-Agent"]).toContain("android.youtube");
-  });
-
-  it("sends videoId in InnerTube request body", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
-
-    await fetchTranscript("myVideoId123");
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.videoId).toBe("myVideoId123");
-    expect(body.context.client.clientName).toBe("ANDROID");
-    expect(body.context.client.clientVersion).toBe("19.09.37");
-    expect(body.context.client.androidSdkVersion).toBe(33);
-    expect(body.videoId).toBe("myVideoId123");
-    expect(body.contentCheckOk).toBe(true);
-    expect(body.racyCheckOk).toBe(true);
-  });
-
-  it("parses TimedText JSON response with multiple segments", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "first " }, { utf8: "part" }], tStartMs: 0, dDurationMs: 3000 },
-        { segs: [{ utf8: "second" }], tStartMs: 3000, dDurationMs: 2000 },
-      ]));
+  it("parses multiple segments from caption response", async () => {
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "first " }, { utf8: "part" }], tStartMs: 0, dDurationMs: 3000 },
+      { segs: [{ utf8: "second" }], tStartMs: 3000, dDurationMs: 2000 },
+    ]));
 
     const result = await fetchTranscript("vid2");
     expect(result).toEqual([
@@ -247,11 +212,11 @@ describe("fetchTranscript", () => {
   });
 
   it("caches fetched transcripts in DB", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "cached text" }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "cached text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
 
     await fetchTranscript("vid3");
     expect(mockDb.execute).toHaveBeenCalledWith(
@@ -260,105 +225,150 @@ describe("fetchTranscript", () => {
     );
   });
 
-  it("returns null when InnerTube player request fails", async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false });
-    const result = await fetchTranscript("fail");
-    expect(result).toBeNull();
+  it("prefers manual English captions over ASR", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/asr", language_code: "en", kind: "asr" },
+      { base_url: "https://example.com/manual", language_code: "en" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "manual" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    await fetchTranscript("pref");
+    const captionUrl = mockFetch.mock.calls[0][0] as string;
+    expect(captionUrl).toContain("example.com/manual");
+  });
+
+  it("falls back to ASR English if no manual English", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/asr", language_code: "en", kind: "asr" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "asr text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    await fetchTranscript("asrfallback");
+    const captionUrl = mockFetch.mock.calls[0][0] as string;
+    expect(captionUrl).toContain("example.com/asr");
+  });
+
+  it("falls back to first track if no English", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/es", language_code: "es" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "hola" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    await fetchTranscript("spanish");
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("returns null when no caption tracks in player response", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ captions: {} }),
-    });
+  it("returns null when no caption tracks", async () => {
+    const yt = makeMockInnertube(null);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
     const result = await fetchTranscript("nocaps");
     expect(result).toBeNull();
   });
 
+  it("returns null when caption tracks is empty array", async () => {
+    const yt = makeMockInnertube([]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const result = await fetchTranscript("emptytracks");
+    expect(result).toBeNull();
+  });
+
   it("returns null when caption fetch fails", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce({ ok: false });
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce({ ok: false });
+
     const result = await fetchTranscript("capfail");
     expect(result).toBeNull();
   });
 
   it("returns null on empty events", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([]));
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([]));
+
     const result = await fetchTranscript("empty");
     expect(result).toBeNull();
   });
 
   it("returns null when events is undefined", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({}) });
+
     const result = await fetchTranscript("noevents");
     expect(result).toBeNull();
   });
 
   it("filters out segments with empty text", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "" }], tStartMs: 0, dDurationMs: 1000 },
-        { segs: [{ utf8: "  " }], tStartMs: 1000, dDurationMs: 1000 },
-        { segs: [{ utf8: "valid" }], tStartMs: 2000, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "" }], tStartMs: 0, dDurationMs: 1000 },
+      { segs: [{ utf8: "  " }], tStartMs: 1000, dDurationMs: 1000 },
+      { segs: [{ utf8: "valid" }], tStartMs: 2000, dDurationMs: 1000 },
+    ]));
 
     const result = await fetchTranscript("mixed");
     expect(result).toEqual([{ text: "valid", start: 2, duration: 1 }]);
   });
 
   it("filters out events without segs", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { tStartMs: 0, dDurationMs: 1000 },
-        { segs: [{ utf8: "has segs" }], tStartMs: 1000, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { tStartMs: 0, dDurationMs: 1000 },
+      { segs: [{ utf8: "has segs" }], tStartMs: 1000, dDurationMs: 1000 },
+    ]));
 
     const result = await fetchTranscript("nosegs");
     expect(result).toEqual([{ text: "has segs", start: 1, duration: 1 }]);
   });
 
   it("returns null when all segments have empty text after filtering", async () => {
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse())
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "   " }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "   " }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
 
     const result = await fetchTranscript("allempty");
     expect(result).toBeNull();
   });
 
-  it("appends fmt=json3 to baseUrl when not present", async () => {
+  it("sets fmt=json3 on caption URL", async () => {
     const baseUrlWithoutFmt = "https://www.youtube.com/api/timedtext?v=test&lang=en&pot=TOKEN";
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse(baseUrlWithoutFmt))
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: baseUrlWithoutFmt, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
 
     await fetchTranscript("fmttest");
-    const captionUrlArg = mockFetch.mock.calls[1][0] as string;
+    const captionUrlArg = mockFetch.mock.calls[0][0] as string;
     expect(captionUrlArg).toContain("fmt=json3");
   });
 
   it("replaces existing fmt parameter with json3", async () => {
     const baseUrlWithSrv3 = "https://www.youtube.com/api/timedtext?v=test&fmt=srv3&pot=TOKEN";
-    mockFetch
-      .mockResolvedValueOnce(makePlayerResponse(baseUrlWithSrv3))
-      .mockResolvedValueOnce(makeCaptionResponse([
-        { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
-      ]));
+    const yt = makeMockInnertube([{ base_url: baseUrlWithSrv3, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
 
     await fetchTranscript("fmtreplace");
-    const captionUrlArg = mockFetch.mock.calls[1][0] as string;
+    const captionUrlArg = mockFetch.mock.calls[0][0] as string;
     expect(captionUrlArg).toContain("fmt=json3");
     expect(captionUrlArg).not.toContain("fmt=srv3");
     const fmtCount = (captionUrlArg.match(/fmt=/g) ?? []).length;

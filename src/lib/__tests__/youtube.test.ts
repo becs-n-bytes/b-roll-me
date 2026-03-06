@@ -1,313 +1,161 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { searchYouTube } from "../youtube";
 
-describe("searchYouTube", () => {
-  let mockFetch: ReturnType<typeof vi.fn>;
+vi.mock("../innertube");
 
-  beforeEach(async () => {
-    const http = await import("@tauri-apps/plugin-http");
-    mockFetch = http.fetch as ReturnType<typeof vi.fn>;
+const { getInnertube } = await import("../innertube");
+const mockGetInnertube = vi.mocked(getInnertube);
+
+function makeVideo(overrides: Record<string, unknown> = {}) {
+  return {
+    video_id: "vid-1",
+    title: { toString: () => "Test Video" },
+    author: { name: "Test Channel" },
+    best_thumbnail: { url: "https://i.ytimg.com/thumb.jpg" },
+    duration: { seconds: 120 },
+    published: { toString: () => "2 weeks ago" },
+    has_captions: true,
+    type: "Video",
+    ...overrides,
+  };
+}
+
+function makeMockInnertube(videos: ReturnType<typeof makeVideo>[]) {
+  return {
+    search: vi.fn().mockResolvedValue({
+      results: {
+        filterType: vi.fn().mockReturnValue(videos),
+      },
+    }),
+  };
+}
+
+describe("searchYouTube", () => {
+  beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  const makeSearchResponse = (items: Array<{ videoId: string; title: string }>) => ({
-    items: items.map((i) => ({
-      id: { videoId: i.videoId },
-      snippet: {
-        title: i.title,
-        channelTitle: "TestChannel",
-        publishedAt: "2024-01-01T00:00:00Z",
-        thumbnails: { medium: { url: `https://img.youtube.com/${i.videoId}` } },
-      },
-    })),
-  });
+  it("maps InnerTube Video nodes to YouTubeResult", async () => {
+    const yt = makeMockInnertube([makeVideo()]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-  const makeDetailsResponse = (items: Array<{ id: string; duration: string; caption: string }>) => ({
-    items: items.map((i) => ({
-      id: i.id,
-      contentDetails: { duration: i.duration, caption: i.caption },
-    })),
-  });
+    const results = await searchYouTube("cats");
 
-  it("constructs correct API URLs", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "Test" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeDetailsResponse([{ id: "v1", duration: "PT5M", caption: "true" }])),
-      });
-
-    await searchYouTube("cats", "API_KEY", 3);
-
-    const searchUrl = mockFetch.mock.calls[0][0] as string;
-    expect(searchUrl).toContain("youtube/v3/search");
-    expect(searchUrl).toContain("q=cats");
-    expect(searchUrl).toContain("maxResults=3");
-    expect(searchUrl).toContain("key=API_KEY");
-    expect(searchUrl).toContain("part=snippet");
-    expect(searchUrl).toContain("type=video");
-
-    const detailsUrl = mockFetch.mock.calls[1][0] as string;
-    expect(detailsUrl).toContain("youtube/v3/videos");
-    expect(detailsUrl).toContain("part=contentDetails");
-    expect(detailsUrl).toContain("id=v1");
-    expect(detailsUrl).toContain("key=API_KEY");
-  });
-
-  it("parses search results and merges with video details", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () =>
-          Promise.resolve(
-            makeSearchResponse([
-              { videoId: "v1", title: "Video One" },
-              { videoId: "v2", title: "Video Two" },
-            ]),
-          ),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () =>
-          Promise.resolve(
-            makeDetailsResponse([
-              { id: "v1", duration: "PT1H2M3S", caption: "true" },
-              { id: "v2", duration: "PT30S", caption: "false" },
-            ]),
-          ),
-      });
-
-    const results = await searchYouTube("test", "key123");
-    expect(results).toHaveLength(2);
-    expect(results[0]).toEqual({
-      videoId: "v1",
-      title: "Video One",
-      channelName: "TestChannel",
-      thumbnailUrl: "https://img.youtube.com/v1",
-      duration: 3723,
-      publishDate: "2024-01-01T00:00:00Z",
+    expect(results).toEqual([{
+      videoId: "vid-1",
+      title: "Test Video",
+      channelName: "Test Channel",
+      thumbnailUrl: "https://i.ytimg.com/thumb.jpg",
+      duration: 120,
+      publishDate: "2 weeks ago",
       captionsAvailable: true,
-      sourceQuery: "test",
-    });
-    expect(results[1].duration).toBe(30);
-    expect(results[1].captionsAvailable).toBe(false);
+      sourceQuery: "cats",
+    }]);
   });
 
-  it("parseDuration: PT1H2M3S → 3723", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeDetailsResponse([{ id: "v1", duration: "PT1H2M3S", caption: "false" }])),
-      });
+  it("passes query and type to yt.search", async () => {
+    const yt = makeMockInnertube([]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results[0].duration).toBe(3723);
+    await searchYouTube("drone footage");
+
+    expect(yt.search).toHaveBeenCalledWith("drone footage", { type: "video" });
   });
 
-  it("parseDuration: PT5M → 300", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeDetailsResponse([{ id: "v1", duration: "PT5M", caption: "false" }])),
-      });
+  it("slices results to maxResults", async () => {
+    const videos = Array.from({ length: 10 }, (_, i) =>
+      makeVideo({ video_id: `v-${i}` })
+    );
+    const yt = makeMockInnertube(videos);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results[0].duration).toBe(300);
+    const results = await searchYouTube("test", 3);
+
+    expect(results).toHaveLength(3);
+    expect(results[0].videoId).toBe("v-0");
+    expect(results[2].videoId).toBe("v-2");
   });
 
-  it("parseDuration: PT30S → 30", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeDetailsResponse([{ id: "v1", duration: "PT30S", caption: "false" }])),
-      });
+  it("uses default maxResults of 5", async () => {
+    const videos = Array.from({ length: 8 }, (_, i) =>
+      makeVideo({ video_id: `v-${i}` })
+    );
+    const yt = makeMockInnertube(videos);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results[0].duration).toBe(30);
+    const results = await searchYouTube("test");
+
+    expect(results).toHaveLength(5);
   });
 
-  it("parseDuration: returns 0 when details missing", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ items: [] }),
-      });
+  it("returns empty array when no results", async () => {
+    const yt = makeMockInnertube([]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results[0].duration).toBe(0);
-    expect(results[0].captionsAvailable).toBe(false);
-  });
+    const results = await searchYouTube("nonexistent");
 
-  it("handles 403 quota exceeded error", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      text: () => Promise.resolve("quotaExceeded something"),
-    });
-
-    await expect(searchYouTube("q", "k")).rejects.toThrow("quota exceeded");
-  });
-
-  it("handles 403 generic error", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      text: () => Promise.resolve("forbidden"),
-    });
-
-    await expect(searchYouTube("q", "k")).rejects.toThrow("access denied");
-  });
-
-  it("handles 400 invalid key error", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-    });
-
-    await expect(searchYouTube("q", "k")).rejects.toThrow("Invalid YouTube API key");
-  });
-
-  it("handles other non-ok responses", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-    });
-
-    await expect(searchYouTube("q", "k")).rejects.toThrow("YouTube API error (500)");
-  });
-
-  it("returns empty array when no items", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ items: [] }),
-    });
-
-    const results = await searchYouTube("q", "k");
     expect(results).toEqual([]);
   });
 
-  it("returns empty array when items is undefined", async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({}),
-    });
+  it("handles missing best_thumbnail", async () => {
+    const yt = makeMockInnertube([makeVideo({ best_thumbnail: null })]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results).toEqual([]);
-  });
+    const results = await searchYouTube("test");
 
-  it("maps captionsAvailable from details", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeDetailsResponse([{ id: "v1", duration: "PT1M", caption: "true" }])),
-      });
-
-    const results = await searchYouTube("q", "k");
-    expect(results[0].captionsAvailable).toBe(true);
-  });
-
-  it("handles thumbnail without medium", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () =>
-          Promise.resolve({
-            items: [
-              {
-                id: { videoId: "v1" },
-                snippet: {
-                  title: "T",
-                  channelTitle: "C",
-                  publishedAt: "2024-01-01T00:00:00Z",
-                  thumbnails: {},
-                },
-              },
-            ],
-          }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ items: [] }),
-      });
-
-    const results = await searchYouTube("q", "k");
     expect(results[0].thumbnailUrl).toBe("");
   });
 
-  it("handles details fetch failure gracefully", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-      });
+  it("handles missing published date", async () => {
+    const yt = makeMockInnertube([makeVideo({ published: null })]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("q", "k");
-    expect(results).toHaveLength(1);
-    expect(results[0].duration).toBe(0);
-    expect(results[0].captionsAvailable).toBe(false);
+    const results = await searchYouTube("test");
+
+    expect(results[0].publishDate).toBe("");
   });
 
   it("preserves sourceQuery in results", async () => {
-    mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(makeSearchResponse([{ videoId: "v1", title: "T" }])),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ items: [] }),
-      });
+    const yt = makeMockInnertube([makeVideo()]);
+    mockGetInnertube.mockResolvedValue(yt as never);
 
-    const results = await searchYouTube("my search query", "k");
+    const results = await searchYouTube("my search query");
+
     expect(results[0].sourceQuery).toBe("my search query");
+  });
+
+  it("maps has_captions false correctly", async () => {
+    const yt = makeMockInnertube([makeVideo({ has_captions: false })]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const results = await searchYouTube("test");
+
+    expect(results[0].captionsAvailable).toBe(false);
+  });
+
+  it("rethrows non-InnertubeError errors", async () => {
+    const yt = {
+      search: vi.fn().mockRejectedValue(new Error("Network down")),
+    };
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    await expect(searchYouTube("test")).rejects.toThrow("Network down");
+  });
+
+  it("maps multiple videos correctly", async () => {
+    const videos = [
+      makeVideo({ video_id: "a", has_captions: true }),
+      makeVideo({ video_id: "b", has_captions: false }),
+    ];
+    const yt = makeMockInnertube(videos);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const results = await searchYouTube("test");
+
+    expect(results).toHaveLength(2);
+    expect(results[0].videoId).toBe("a");
+    expect(results[0].captionsAvailable).toBe(true);
+    expect(results[1].videoId).toBe("b");
+    expect(results[1].captionsAvailable).toBe(false);
   });
 });

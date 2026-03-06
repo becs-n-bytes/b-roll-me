@@ -20,7 +20,7 @@ Script -> [M1: Analyze] -> Moments -> [M2: Search+Transcript] -> Results -> [M3:
 
 **`src/pages/Dashboard.tsx`** - Project list/grid. CRUD operations via `projectStore`. Each project card shows name and timestamps. "New Project" button opens `NewProjectDialog`.
 
-**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, OpenRouter, Gemini, YouTube with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (dynamic LLM model selector via `ModelSelector` component that fetches models from all configured provider APIs, per-feature model overrides via `FeatureModelOverride` components driven by `LLM_FEATURES` array, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
+**`src/pages/Settings.tsx`** - Full settings UI. Six sections: API Keys (Anthropic, OpenAI, OpenRouter, Gemini with Test Connection buttons), Download Preferences (output dir, format, resolution, concurrent limit), Analysis Preferences (dynamic LLM model selector via `ModelSelector` component that fetches models from all configured provider APIs, per-feature model overrides via `FeatureModelOverride` components driven by `LLM_FEATURES` array, max moments), Application (theme, updates toggle), About (version, app ID). All changes persist immediately via `settingsStore.saveSetting()`.
 
 #### Components
 
@@ -40,7 +40,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 **`src/stores/momentStore.ts`** - Analysis results. `loadMoments(projectId)`, `saveMoments(projectId, brollMoments)` (deletes old, inserts new), `clearMoments(projectId)`. Stores parsed `BRollMoment` objects with suggestions.
 
-**`src/stores/searchStore.ts`** - YouTube search results. `searchForMoment(momentId, queries, apiKey)`, `loadResults(momentIds)`. Stores results keyed by moment ID. Also triggers transcript fetching and keyword matching via `searchTranscript()`.
+**`src/stores/searchStore.ts`** - YouTube search results. `searchForMoment(momentId, queries)`, `loadResults(momentIds)`. Stores results keyed by moment ID. Also triggers transcript fetching and keyword matching via `searchTranscript()`.
 
 **`src/stores/evaluationStore.ts`** - LLM evaluations. `evaluateMoment(...)` sends search results to the LLM for scoring. Stores `evaluations: Map<string, EvaluatedClip[]>` keyed by moment ID. `toggleSort()` switches between default and score-sorted display.
 
@@ -54,9 +54,11 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 **`src/lib/evaluator.ts`** - Clip evaluation. `evaluateClips(scriptExcerpt, editorialNote, suggestionDescriptions, results, apiKey, model?)` sends a batch of search results to the LLM for scoring. Uses `callLlm()` internally. `estimateEvaluationTokens()` provides cost estimates.
 
-**`src/lib/youtube.ts`** - YouTube Data API v3. `searchYouTube(query, apiKey, maxResults)` does a two-phase search: Search endpoint for video IDs, then Videos endpoint for duration and caption metadata. Returns `YouTubeResult[]`.
+**`src/lib/innertube.ts`** - Lazy singleton for the `youtubei.js` InnerTube client. `getInnertube()` returns a cached `Innertube` instance configured with `generate_session_locally: true`, `retrieve_player: false`, and Tauri's `fetch` for CORS-free requests. No API key required.
 
-**`src/lib/transcript.ts`** - YouTube transcript fetching. `fetchTranscript(videoId)` scrapes the YouTube page for embedded caption data, parses XML tracks into `TranscriptSegment[]`. Caches results in the `transcript_cache` table. `searchTranscript(segments, keywords)` performs keyword matching and returns `TranscriptMatch[]` with timestamps.
+**`src/lib/youtube.ts`** - YouTube search via `youtubei.js`. `searchYouTube(query, maxResults)` uses `yt.search(query, { type: "video" })` and maps `YTNodes.Video` results to `YouTubeResult[]`. No API key required — uses the InnerTube protocol directly. Wraps `Utils.InnertubeError` into standard Error.
+
+**`src/lib/transcript.ts`** - YouTube transcript fetching via `youtubei.js`. `fetchTranscript(videoId)` uses `yt.getBasicInfo(videoId, { client: "ANDROID" })` to get caption track URLs, then fetches the TimedText JSON (fmt=json3) via Tauri HTTP. Prefers manual English captions over ASR, falls back to first available track. Caches results in the `transcript_cache` table. `searchTranscript(segments, keywords)` performs keyword matching with a sliding window of 3 segments and returns `TranscriptMatch[]` with timestamps.
 
 **`src/lib/downloader.ts`** - Tauri invoke wrappers. `downloadClip(clipId, videoUrl, startTime, endTime, outputPath, onProgress)` calls the Rust `download_clip` command and listens for `download-progress` events. `cancelDownload(clipId)` and `ensureOutputDir(path)` are also thin wrappers.
 
@@ -80,7 +82,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 
 **`src-tauri/tauri.conf.json`** - Tauri configuration. CSP is null (no restrictions). External binaries: yt-dlp and ffmpeg. Window: 1200x800, min 900x600.
 
-**`src-tauri/capabilities/default.json`** - Security permissions. HTTP fetch is scoped to Anthropic, OpenAI, OpenRouter, Google APIs (Gemini + YouTube). Shell spawn/execute is scoped to the two sidecar binaries only.
+**`src-tauri/capabilities/default.json`** - Security permissions. HTTP fetch is scoped to Anthropic, OpenAI, OpenRouter, Google Gemini API, and YouTube (for InnerTube). Shell spawn/execute is scoped to the two sidecar binaries only.
 
 ### Test Infrastructure
 
@@ -89,7 +91,7 @@ All stores follow the same pattern: `create<Interface>((set, get) => ({ ... }))`
 **`src/test/mocks.ts`** - Shared mock utilities. Has known pre-existing TS errors about `require` (harmless).
 
 Test files are colocated in `__tests__/` directories next to their source:
-- `src/lib/__tests__/` - 6 test files (llm, models, evaluator, youtube, transcript, downloader)
+- `src/lib/__tests__/` - 7 test files (llm, models, evaluator, youtube, transcript, downloader, streaming)
 - `src/stores/__tests__/` - 6 test files (settings, project, moment, search, evaluation, download)
 - `src/pages/__tests__/` - 3 test files (Dashboard, ProjectView, Settings)
 
@@ -103,10 +105,10 @@ Test files are colocated in `__tests__/` directories next to their source:
 5. UI re-renders moment cards
 
 ### Search Flow
-1. Per moment, "Search" button -> read `youtube_api_key` from settings table
-2. `searchStore.searchForMoment()` -> `searchYouTube()` for each query
+1. Per moment, "Search" button clicked (no API key needed)
+2. `searchStore.searchForMoment()` -> `searchYouTube()` via `youtubei.js` InnerTube for each query
 3. Deduplicate by video ID -> INSERT into `search_results` table
-4. For each result with captions: `fetchTranscript()` -> cache in `transcript_cache`
+4. For each result: `fetchTranscript()` via `yt.getBasicInfo()` -> cache in `transcript_cache`
 5. `searchTranscript()` matches keywords -> UPDATE `transcript_matches_json`
 
 ### Evaluation Flow
@@ -136,11 +138,11 @@ Test files are colocated in `__tests__/` directories next to their source:
 - **In React components**: `useSettingsStore()` hook
 - **In lib functions**: `getSettingFromDb(key)` standalone async function
 - **In stores**: `useSettingsStore.getState().settings.xxx` for synchronous reads
-- **API keys in ProjectView**: Direct DB reads via `getDb()` (predates the store pattern)
+- **LLM API keys in ProjectView**: Direct DB reads via `getDb()` (predates the store pattern)
 
 ### Error Handling
 - LLM calls: 401 -> "Invalid API key", 429 -> "Rate limited", 5xx -> "Server error"
-- YouTube: 403 + quotaExceeded -> "Quota exceeded", 400 -> "Invalid key"
+- YouTube: `Utils.InnertubeError` -> "YouTube search failed: {message}"
 - Downloads: yt-dlp exit code != 0 -> error message, signal -> "cancelled"
 - All errors surface in the UI via store error state
 
@@ -167,7 +169,7 @@ Current features with overrides:
 
 2. **The ffmpeg sidecar is dynamically linked** (~432K from Homebrew). It works for development but will fail on machines without the same shared libraries. Needs a static build for distribution.
 
-3. **ProjectView.tsx reads API keys directly from the DB** instead of using `getSettingFromDb()`. This predates the settings store expansion and works fine, but is inconsistent with the rest of the codebase.
+3. **ProjectView.tsx reads LLM API keys directly from the DB** instead of using `getSettingFromDb()`. This predates the settings store expansion and works fine, but is inconsistent with the rest of the codebase.
 
 4. **The model is not passed through the full call chain in ProjectView**. When `analyzeScript()` is called from ProjectView, it doesn't pass a model parameter, so it falls back to `getSettingFromDb("llm_model")` inside `callLlm()`. This is correct behavior but may be non-obvious.
 

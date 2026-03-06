@@ -10,8 +10,8 @@ interface SearchState {
   searchingMoments: Set<string>;
   error: string | null;
   loadResults: (momentIds: string[]) => Promise<void>;
-  searchForMoment: (momentId: string, queries: string[], apiKey: string) => Promise<void>;
-  searchCustom: (momentId: string, query: string, apiKey: string) => Promise<void>;
+  searchForMoment: (momentId: string, queries: string[]) => Promise<void>;
+  searchCustom: (momentId: string, query: string) => Promise<void>;
   fetchTranscriptMatches: (resultId: string, videoId: string, queries: string[]) => Promise<void>;
 }
 
@@ -67,7 +67,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     set({ results: newResults });
   },
 
-  searchForMoment: async (momentId: string, queries: string[], apiKey: string) => {
+  searchForMoment: async (momentId: string, queries: string[]) => {
     set((s) => ({ searchingMoments: new Set(s.searchingMoments).add(momentId), error: null }));
 
     try {
@@ -75,7 +75,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
       const seenVideoIds = new Set<string>();
 
       for (const query of queries) {
-        const results = await searchYouTube(query, apiKey);
+        const results = await searchYouTube(query);
         for (const r of results) {
           if (!seenVideoIds.has(r.videoId)) {
             seenVideoIds.add(r.videoId);
@@ -131,11 +131,11 @@ export const useSearchStore = create<SearchState>((set, get) => ({
     }
   },
 
-  searchCustom: async (momentId: string, query: string, apiKey: string) => {
+  searchCustom: async (momentId: string, query: string) => {
     set((s) => ({ searchingMoments: new Set(s.searchingMoments).add(momentId), error: null }));
 
     try {
-      const results = await searchYouTube(query, apiKey);
+      const results = await searchYouTube(query);
       const saved = await saveResults(momentId, results);
       set((s) => {
         const newResults = new Map(s.results);

@@ -7,7 +7,6 @@ const DEFAULTS: AppSettings = {
   openai_api_key: "",
   openrouter_api_key: "",
   gemini_api_key: "",
-  youtube_api_key: "",
   default_output_dir: "",
   video_format: "mp4",
   resolution: "best",

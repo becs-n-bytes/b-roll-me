@@ -14,7 +14,7 @@ function ApiKeySection({
   testEndpoint,
 }: {
   label: string;
-  settingsKey: "anthropic_api_key" | "openai_api_key" | "openrouter_api_key" | "gemini_api_key" | "youtube_api_key";
+  settingsKey: "anthropic_api_key" | "openai_api_key" | "openrouter_api_key" | "gemini_api_key";
   placeholder: string;
   helpText: string;
   testEndpoint?: () => Promise<void>;
@@ -786,16 +786,6 @@ export default function Settings() {
     }
   };
 
-  const testYouTubeKey = async () => {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=test&maxResults=1&key=${settings.youtube_api_key}`;
-    const response = await fetch(url);
-    if (response.status === 400 || response.status === 403) {
-      throw new Error("Invalid or restricted API key");
-    }
-    if (!response.ok) {
-      throw new Error(`API error (${response.status})`);
-    }
-  };
 
   return (
     <div className="p-6 max-w-2xl">
@@ -841,13 +831,6 @@ export default function Settings() {
           testEndpoint={testGeminiKey}
         />
 
-        <ApiKeySection
-          label="YouTube Data API Key"
-          settingsKey="youtube_api_key"
-          placeholder="AIza..."
-          helpText="Used for searching YouTube clips. Get a key from the Google Cloud Console."
-          testEndpoint={testYouTubeKey}
-        />
       </section>
 
       <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6">

@@ -97,7 +97,7 @@ describe("searchStore", () => {
         .mockResolvedValueOnce([makeYTResult({ videoId: "a" }), dup])
         .mockResolvedValueOnce([dup, makeYTResult({ videoId: "b" })]);
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q1", "q2"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q1", "q2"]);
 
       expect(mockSearchYouTube).toHaveBeenCalledTimes(2);
       expect(mockDb.execute).toHaveBeenCalledTimes(3);
@@ -116,7 +116,7 @@ describe("searchStore", () => {
         .mockResolvedValueOnce(batch)
         .mockResolvedValueOnce(batch.map((r) => ({ ...r, videoId: `x${r.videoId}` })));
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q1", "q2", "q3"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q1", "q2", "q3"]);
 
       expect(mockSearchYouTube).toHaveBeenCalledTimes(2);
     });
@@ -128,7 +128,7 @@ describe("searchStore", () => {
         return [];
       });
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q1"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q1"]);
 
       expect(capturedSearching).toBe(true);
       expect(useSearchStore.getState().searchingMoments.has("m-1")).toBe(false);
@@ -146,7 +146,7 @@ describe("searchStore", () => {
         { text: "hello world", startTime: 10, endTime: 15 },
       ]);
 
-      await useSearchStore.getState().searchForMoment("m-1", ["hello"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["hello"]);
 
       expect(mockFetchTranscript).toHaveBeenCalledWith("cap-vid");
       expect(mockSearchTranscript).toHaveBeenCalledWith(segments, "hello");
@@ -162,7 +162,7 @@ describe("searchStore", () => {
       ]);
       mockFetchTranscript.mockResolvedValueOnce(null);
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q"]);
 
       expect(mockFetchTranscript).toHaveBeenCalledWith("no-cap-vid");
     });
@@ -170,7 +170,7 @@ describe("searchStore", () => {
     it("sets error and clears searching on failure", async () => {
       mockSearchYouTube.mockRejectedValueOnce(new Error("API quota exceeded"));
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q"]);
 
       const state = useSearchStore.getState();
       expect(state.error).toBe("API quota exceeded");
@@ -180,7 +180,7 @@ describe("searchStore", () => {
     it("sets generic error for non-Error thrown values", async () => {
       mockSearchYouTube.mockRejectedValueOnce("string error");
 
-      await useSearchStore.getState().searchForMoment("m-1", ["q"], "key");
+      await useSearchStore.getState().searchForMoment("m-1", ["q"]);
 
       expect(useSearchStore.getState().error).toBe("Search failed");
     });
@@ -190,9 +190,9 @@ describe("searchStore", () => {
     it("searches a single query and saves results", async () => {
       mockSearchYouTube.mockResolvedValueOnce([makeYTResult()]);
 
-      await useSearchStore.getState().searchCustom("m-1", "custom query", "key");
+      await useSearchStore.getState().searchCustom("m-1", "custom query");
 
-      expect(mockSearchYouTube).toHaveBeenCalledWith("custom query", "key");
+      expect(mockSearchYouTube).toHaveBeenCalledWith("custom query");
       expect(useSearchStore.getState().results.get("m-1")).toHaveLength(1);
     });
 
@@ -205,7 +205,7 @@ describe("searchStore", () => {
       });
       mockSearchYouTube.mockResolvedValueOnce([makeYTResult({ videoId: "new-vid" })]);
 
-      await useSearchStore.getState().searchCustom("m-1", "more", "key");
+      await useSearchStore.getState().searchCustom("m-1", "more");
 
       const results = useSearchStore.getState().results.get("m-1");
       expect(results).toHaveLength(2);
@@ -215,7 +215,7 @@ describe("searchStore", () => {
     it("sets error on failure", async () => {
       mockSearchYouTube.mockRejectedValueOnce(new Error("Network error"));
 
-      await useSearchStore.getState().searchCustom("m-1", "q", "key");
+      await useSearchStore.getState().searchCustom("m-1", "q");
 
       expect(useSearchStore.getState().error).toBe("Network error");
       expect(useSearchStore.getState().searchingMoments.has("m-1")).toBe(false);

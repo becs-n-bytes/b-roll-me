@@ -320,7 +320,6 @@ function MomentCard({
   moment,
   searchResults,
   isSearching,
-  hasYouTubeKey,
   hasDownloads,
   evaluations,
   isEvaluating,
@@ -336,7 +335,6 @@ function MomentCard({
   moment: { id: string; script_excerpt: string; timestamp_hint: string | null; editorial_note: string | null; suggestions_json: string | null };
   searchResults: SearchResult[];
   isSearching: boolean;
-  hasYouTubeKey: boolean;
   hasDownloads: boolean;
   evaluations: EvaluatedClip[];
   isEvaluating: boolean;
@@ -428,7 +426,7 @@ function MomentCard({
                 {(isSearching || isEvaluating) && <SmallSpinner />}
                 <button
                   onClick={() => onSearch(allQueries)}
-                  disabled={!hasYouTubeKey || isSearching}
+                  disabled={isSearching}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white transition-colors"
                 >
                   <SearchIcon />
@@ -462,7 +460,7 @@ function MomentCard({
               />
               <button
                 onClick={() => { if (customQuery.trim()) { onCustomSearch(customQuery.trim()); setCustomQuery(""); } }}
-                disabled={!hasYouTubeKey || !customQuery.trim() || isSearching}
+                disabled={!customQuery.trim() || isSearching}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 hover:bg-neutral-700 disabled:text-neutral-600 text-neutral-300 transition-colors"
               >
                 Search
@@ -477,7 +475,7 @@ function MomentCard({
               </div>
             ) : (
               <p className="text-xs text-neutral-600">
-                {hasYouTubeKey ? "Click Search to find clips." : "Add your YouTube API key in Settings."}
+                Click Search to find clips.
               </p>
             )}
           </div>
@@ -612,8 +610,6 @@ export default function ProjectView() {
   const [streamExpanded, setStreamExpanded] = useState(true);
   const streamRef = useRef<HTMLPreElement>(null);
   const [hasApiKey, setHasApiKey] = useState(false);
-  const [hasYouTubeKey, setHasYouTubeKey] = useState(false);
-  const [youtubeApiKey, setYoutubeApiKey] = useState("");
   const [scriptChangedSinceAnalysis, setScriptChangedSinceAnalysis] = useState(false);
   const [searchingAll, setSearchingAll] = useState(false);
   const [evaluatingAll, setEvaluatingAll] = useState(false);
@@ -649,11 +645,6 @@ export default function ProjectView() {
       const db = await getDb();
       const modelRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["llm_model"]);
       setHasApiKey(modelRows.length > 0 && modelRows[0].value.length > 0);
-      const ytRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["youtube_api_key"]);
-      if (ytRows.length > 0 && ytRows[0].value.length > 0) {
-        setHasYouTubeKey(true);
-        setYoutubeApiKey(ytRows[0].value);
-      }
     })();
   }, []);
 
@@ -746,12 +737,11 @@ export default function ProjectView() {
   };
 
   const handleSearchAll = async () => {
-    if (!hasYouTubeKey) return;
     setSearchingAll(true);
     for (const moment of moments) {
       const suggestions: BRollSuggestion[] = moment.suggestions_json ? JSON.parse(moment.suggestions_json) : [];
       const queries = suggestions.flatMap((s) => s.searchQueries);
-      if (queries.length > 0) await searchForMoment(moment.id, queries, youtubeApiKey);
+      if (queries.length > 0) await searchForMoment(moment.id, queries);
     }
     setSearchingAll(false);
   };
@@ -820,8 +810,6 @@ export default function ProjectView() {
     if (!id || !scriptText.trim()) return;
     pipelineCancelledRef.current = false;
 
-    const db = await getDb();
-
     try {
       setPipelineStep("analyzing");
       setPipelineProgress({ current: 0, total: 1, detail: "Analyzing script..." });
@@ -837,18 +825,14 @@ export default function ProjectView() {
       const latestMoments = useMomentStore.getState().moments;
       if (latestMoments.length === 0) { setPipelineStep("complete"); setTimeout(() => setPipelineStep("idle"), 3000); return; }
 
-      const ytRows = await db.select<{ value: string }[]>("SELECT value FROM settings WHERE key = $1", ["youtube_api_key"]);
-      if (ytRows.length > 0 && ytRows[0].value) {
-        setPipelineStep("searching");
-        const ytKey = ytRows[0].value;
-        for (let i = 0; i < latestMoments.length; i++) {
-          if (pipelineCancelledRef.current) { setPipelineStep("idle"); return; }
-          const m = latestMoments[i];
-          setPipelineProgress({ current: i + 1, total: latestMoments.length, detail: `Searching moment ${i + 1} of ${latestMoments.length}...` });
-          const suggestions: BRollSuggestion[] = m.suggestions_json ? JSON.parse(m.suggestions_json) : [];
-          const queries = suggestions.flatMap((s) => s.searchQueries);
-          if (queries.length > 0) await searchForMoment(m.id, queries, ytKey);
-        }
+      setPipelineStep("searching");
+      for (let i = 0; i < latestMoments.length; i++) {
+        if (pipelineCancelledRef.current) { setPipelineStep("idle"); return; }
+        const m = latestMoments[i];
+        setPipelineProgress({ current: i + 1, total: latestMoments.length, detail: `Searching moment ${i + 1} of ${latestMoments.length}...` });
+        const suggestions: BRollSuggestion[] = m.suggestions_json ? JSON.parse(m.suggestions_json) : [];
+        const queries = suggestions.flatMap((s) => s.searchQueries);
+        if (queries.length > 0) await searchForMoment(m.id, queries);
       }
 
       if (pipelineCancelledRef.current) { setPipelineStep("idle"); return; }
@@ -964,7 +948,7 @@ export default function ProjectView() {
             {scriptChangedSinceAnalysis && <span className="text-xs text-amber-500">Script changed since last analysis</span>}
             {moments.length > 0 && !analyzing && !pipelineRunning && (
               <>
-                <button onClick={handleSearchAll} disabled={!hasYouTubeKey || searchingAll} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 disabled:text-neutral-600 disabled:hover:bg-transparent transition-colors">
+                <button onClick={handleSearchAll} disabled={searchingAll} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 disabled:text-neutral-600 disabled:hover:bg-transparent transition-colors">
                   {searchingAll ? <SmallSpinner /> : <SearchIcon />} Search All
                 </button>
                 <button onClick={handleEvaluateAll} disabled={!hasApiKey || evaluatingAll || searchedCount === 0} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-purple-400 hover:bg-purple-500/10 disabled:text-neutral-600 disabled:hover:bg-transparent transition-colors">
@@ -990,11 +974,11 @@ export default function ProjectView() {
                 {pipelineStep === "confirming" ? (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-neutral-400">Run full pipeline?</span>
-                    <button onClick={() => { setPipelineStep("idle"); runPipeline(); }} disabled={!canAnalyze || !hasYouTubeKey} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white transition-colors">Start</button>
+                    <button onClick={() => { setPipelineStep("idle"); runPipeline(); }} disabled={!canAnalyze} className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white transition-colors">Start</button>
                     <button onClick={() => setPipelineStep("idle")} className="px-3 py-1.5 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors">Cancel</button>
                   </div>
                 ) : (
-                  <button onClick={() => setPipelineStep("confirming")} disabled={!canAnalyze || !hasYouTubeKey} className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:bg-none text-white transition-colors">Auto-Analyze</button>
+                  <button onClick={() => setPipelineStep("confirming")} disabled={!canAnalyze} className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:bg-neutral-800 disabled:text-neutral-500 disabled:bg-none text-white transition-colors">Auto-Analyze</button>
                 )}
               </>
             )}
@@ -1069,14 +1053,13 @@ export default function ProjectView() {
                 moment={moment}
                 searchResults={searchResults.get(moment.id) ?? []}
                 isSearching={searchingMoments.has(moment.id)}
-                hasYouTubeKey={hasYouTubeKey}
                 hasDownloads={downloadedMomentIds.has(moment.id)}
                 evaluations={evaluationMap.get(moment.id) ?? []}
                 isEvaluating={evaluatingMoments.has(moment.id)}
                 sortByEvaluation={sortByEvaluation}
                 hasLlmKey={hasApiKey}
-                onSearch={(queries) => searchForMoment(moment.id, queries, youtubeApiKey)}
-                onCustomSearch={(query) => searchCustom(moment.id, query, youtubeApiKey)}
+                onSearch={(queries) => searchForMoment(moment.id, queries)}
+                onCustomSearch={(query) => searchCustom(moment.id, query)}
                 onDownload={(result, start, end) => handleDownload(moment.id, index, result, start, end)}
                 onPreview={(result) => handlePreview(result, moment.id, index)}
                 onEvaluate={() => handleEvaluateMoment(moment.id)}
