@@ -2,7 +2,7 @@ import { fetch } from "@tauri-apps/plugin-http";
 import { getDb } from "./database";
 import type { TranscriptSegment, TranscriptMatch } from "../types";
 
-const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const ANDROID_UA = "com.google.android.youtube/19.09.37 (Linux; U; Android 13; en_US) gzip";
 
 interface CaptionTrack {
   baseUrl: string;
@@ -32,16 +32,21 @@ async function getCaptionUrl(videoId: string, lang = "en"): Promise<string | nul
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "User-Agent": BROWSER_UA,
+      "User-Agent": ANDROID_UA,
     },
     body: JSON.stringify({
       context: {
         client: {
-          clientName: "WEB",
-          clientVersion: "2.20240101.00.00",
+          clientName: "ANDROID",
+          clientVersion: "19.09.37",
+          androidSdkVersion: 33,
+          hl: lang,
+          gl: "US",
         },
       },
       videoId,
+      contentCheckOk: true,
+      racyCheckOk: true,
     }),
   });
 
@@ -81,7 +86,7 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
   }
 
   const response = await fetch(safeUrl, {
-    headers: { "User-Agent": BROWSER_UA },
+    headers: { "User-Agent": ANDROID_UA },
   });
 
   if (!response.ok) return null;

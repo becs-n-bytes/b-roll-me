@@ -209,8 +209,8 @@ describe("fetchTranscript", () => {
     await fetchTranscript("vid-ua");
     const playerHeaders = mockFetch.mock.calls[0][1].headers;
     const captionHeaders = mockFetch.mock.calls[1][1].headers;
-    expect(playerHeaders["User-Agent"]).toContain("Mozilla");
-    expect(captionHeaders["User-Agent"]).toContain("Mozilla");
+    expect(playerHeaders["User-Agent"]).toContain("android.youtube");
+    expect(captionHeaders["User-Agent"]).toContain("android.youtube");
   });
 
   it("sends videoId in InnerTube request body", async () => {
@@ -223,7 +223,12 @@ describe("fetchTranscript", () => {
     await fetchTranscript("myVideoId123");
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.videoId).toBe("myVideoId123");
-    expect(body.context.client.clientName).toBe("WEB");
+    expect(body.context.client.clientName).toBe("ANDROID");
+    expect(body.context.client.clientVersion).toBe("19.09.37");
+    expect(body.context.client.androidSdkVersion).toBe(33);
+    expect(body.videoId).toBe("myVideoId123");
+    expect(body.contentCheckOk).toBe(true);
+    expect(body.racyCheckOk).toBe(true);
   });
 
   it("parses TimedText JSON response with multiple segments", async () => {
