@@ -349,16 +349,18 @@ describe("fetchTranscript", () => {
     expect(captionUrlArg).toContain("fmt=json3");
   });
 
-  it("does not double-append fmt when baseUrl already has it", async () => {
-    const baseUrlWithFmt = "https://www.youtube.com/api/timedtext?v=test&fmt=json3&pot=TOKEN";
+  it("replaces existing fmt parameter with json3", async () => {
+    const baseUrlWithSrv3 = "https://www.youtube.com/api/timedtext?v=test&fmt=srv3&pot=TOKEN";
     mockFetch
-      .mockResolvedValueOnce(makePlayerResponse(baseUrlWithFmt))
+      .mockResolvedValueOnce(makePlayerResponse(baseUrlWithSrv3))
       .mockResolvedValueOnce(makeCaptionResponse([
         { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
       ]));
 
-    await fetchTranscript("fmtexists");
+    await fetchTranscript("fmtreplace");
     const captionUrlArg = mockFetch.mock.calls[1][0] as string;
+    expect(captionUrlArg).toContain("fmt=json3");
+    expect(captionUrlArg).not.toContain("fmt=srv3");
     const fmtCount = (captionUrlArg.match(/fmt=/g) ?? []).length;
     expect(fmtCount).toBe(1);
   });

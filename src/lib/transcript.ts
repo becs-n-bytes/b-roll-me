@@ -59,9 +59,8 @@ async function getCaptionUrl(videoId: string, lang = "en"): Promise<string | nul
   const track = tracks.find((t) => t.languageCode === lang) ?? tracks[0];
   if (!track?.baseUrl) return null;
 
-  return track.baseUrl.includes("fmt=")
-    ? track.baseUrl
-    : `${track.baseUrl}&fmt=json3`;
+  const url = track.baseUrl.replace(/([?&])fmt=[^&]*/, "$1fmt=json3");
+  return url === track.baseUrl ? `${track.baseUrl}&fmt=json3` : url;
 }
 
 export async function fetchTranscript(videoId: string): Promise<TranscriptSegment[] | null> {

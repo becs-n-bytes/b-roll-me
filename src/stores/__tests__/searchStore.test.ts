@@ -156,14 +156,15 @@ describe("searchStore", () => {
       expect(updateCall).toBeDefined();
     });
 
-    it("skips transcript fetch for results without captions", async () => {
+    it("attempts transcript fetch for results without captions flag", async () => {
       mockSearchYouTube.mockResolvedValueOnce([
-        makeYTResult({ captionsAvailable: false }),
+        makeYTResult({ videoId: "no-cap-vid", captionsAvailable: false }),
       ]);
+      mockFetchTranscript.mockResolvedValueOnce(null);
 
       await useSearchStore.getState().searchForMoment("m-1", ["q"], "key");
 
-      expect(mockFetchTranscript).not.toHaveBeenCalled();
+      expect(mockFetchTranscript).toHaveBeenCalledWith("no-cap-vid");
     });
 
     it("sets error and clears searching on failure", async () => {
