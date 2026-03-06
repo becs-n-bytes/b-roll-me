@@ -18,6 +18,7 @@
         { "url": "https://api.openai.com/**" },
         { "url": "https://openrouter.ai/**" },
         { "url": "https://generativelanguage.googleapis.com/**" },
+        { "url": "https://jnn-pa.googleapis.com/**" },
         { "url": "https://www.youtube.com/**" }
       ]
     },

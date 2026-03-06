@@ -39,7 +39,9 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
   const captionUrl = new URL(track.base_url);
   captionUrl.searchParams.set("fmt", "json3");
 
-  const response = await fetch(captionUrl.toString());
+  const response = await fetch(captionUrl.toString(), {
+    headers: { Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" },
+  });
   if (!response.ok) return null;
 
   const data = (await response.json()) as TimedTextResponse;
