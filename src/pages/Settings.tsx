@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { useSettingsStore } from "../stores/settingsStore";
-import type { VideoFormat, Resolution } from "../types";
+import type { VideoFormat, Resolution, WhisperModel } from "../types";
 import { fetchAllModels, toModelValue, parseModelValue, type ModelOption, type LlmProvider } from "../lib/models";
+import { WHISPER_MODELS, getWhisperStatus, downloadWhisperModel, deleteWhisperModel } from "../lib/whisper";
 
 type TestStatus = "idle" | "testing" | "success" | "error";
 
@@ -683,6 +684,143 @@ function FeatureModelOverride({
   );
 }
 
+function WhisperSection() {
+  const { settings, saveSetting } = useSettingsStore();
+  const [modelStatuses, setModelStatuses] = useState<Record<string, { downloaded: boolean; size_bytes: number | null }>>({});
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const checkStatuses = useCallback(async () => {
+    const statuses: Record<string, { downloaded: boolean; size_bytes: number | null }> = {};
+    for (const model of WHISPER_MODELS) {
+      try {
+        const status = await getWhisperStatus(model.name);
+        statuses[model.name] = { downloaded: status.downloaded, size_bytes: status.size_bytes };
+      } catch {
+        statuses[model.name] = { downloaded: false, size_bytes: null };
+      }
+    }
+    setModelStatuses(statuses);
+  }, []);
+
+  useEffect(() => {
+    checkStatuses();
+  }, [checkStatuses]);
+
+  const handleDownload = async (modelName: string) => {
+    setDownloading(modelName);
+    setDownloadProgress(0);
+    try {
+      await downloadWhisperModel(modelName, (downloaded, total) => {
+        if (total > 0) setDownloadProgress(Math.round((downloaded / total) * 100));
+      });
+      await checkStatuses();
+    } catch (err) {
+      console.error("Model download failed:", err);
+    }
+    setDownloading(null);
+    setDownloadProgress(0);
+  };
+
+  const handleDelete = async (modelName: string) => {
+    setDeleting(modelName);
+    try {
+      await deleteWhisperModel(modelName);
+      await checkStatuses();
+    } catch (err) {
+      console.error("Model delete failed:", err);
+    }
+    setDeleting(null);
+  };
+
+  return (
+    <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6">
+      <h2 className="text-lg font-semibold text-neutral-200 mb-1">
+        Transcription
+      </h2>
+      <p className="text-xs text-neutral-600 mb-4">
+        Local Whisper model for transcribing videos without YouTube captions.
+      </p>
+      <div className="divide-y divide-neutral-800">
+        <SelectField<WhisperModel>
+          label="Whisper model"
+          value={settings.whisper_model}
+          options={WHISPER_MODELS.map((m) => ({
+            value: m.name,
+            label: `${m.displayName} (${m.size})`,
+          }))}
+          onChange={(v) => saveSetting("whisper_model", v)}
+        />
+        <div className="py-3">
+          <label className="text-sm text-neutral-300 mb-2 block">Models</label>
+          <div className="space-y-2">
+            {WHISPER_MODELS.map((model) => {
+              const status = modelStatuses[model.name];
+              const isDownloading = downloading === model.name;
+              const isDeleting = deleting === model.name;
+              const isActive = settings.whisper_model === model.name;
+              return (
+                <div
+                  key={model.name}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    isActive
+                      ? "border-blue-500/30 bg-blue-500/5"
+                      : "border-neutral-800 bg-neutral-900/50"
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-neutral-200">{model.displayName}</span>
+                      <span className="text-xs text-neutral-600">{model.size}</span>
+                      {isActive && (
+                        <span className="text-xs text-blue-400 font-medium">Active</span>
+                      )}
+                    </div>
+                    {isDownloading && (
+                      <div className="mt-1.5 w-full bg-neutral-800 rounded-full h-1.5">
+                        <div
+                          className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                          style={{ width: `${downloadProgress}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="ml-3 shrink-0">
+                    {status?.downloaded ? (
+                      <button
+                        onClick={() => handleDelete(model.name)}
+                        disabled={isDeleting}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition-colors disabled:opacity-50"
+                      >
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDownload(model.name)}
+                        disabled={downloading !== null}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 transition-colors disabled:opacity-50"
+                      >
+                        {isDownloading ? `${downloadProgress}%` : "Download"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <ToggleField
+          label="Auto-transcribe"
+          description="Automatically transcribe with Whisper when YouTube captions are unavailable"
+          checked={settings.auto_transcribe}
+          onChange={(v) => saveSetting("auto_transcribe", v)}
+        />
+      </div>
+    </section>
+  );
+}
+
 export default function Settings() {
   const { settings, saveSetting, loadSettings, loaded } = useSettingsStore();
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -914,6 +1052,8 @@ export default function Settings() {
           />
         </div>
       </section>
+
+      <WhisperSection />
 
       <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 mb-6">
         <h2 className="text-lg font-semibold text-neutral-200 mb-4">

@@ -79,6 +79,14 @@ export interface SearchResult {
 export type VideoFormat = "mp4" | "webm";
 export type Resolution = "720" | "1080" | "best";
 export type LlmModel = string;
+export type WhisperModel = "tiny.en" | "base.en" | "small.en" | "medium.en" | "large-v3-turbo-q5_0";
+
+export interface WhisperModelInfo {
+  name: WhisperModel;
+  displayName: string;
+  size: string;
+  sizeBytes: number;
+}
 
 export interface AppSettings {
   anthropic_api_key: string;
@@ -93,6 +101,8 @@ export interface AppSettings {
   analysis_model_override: string;
   evaluation_model_override: string;
   max_moments_per_analysis: number;
+  whisper_model: WhisperModel;
+  auto_transcribe: boolean;
   theme: "dark" | "light";
   check_for_updates: boolean;
 }

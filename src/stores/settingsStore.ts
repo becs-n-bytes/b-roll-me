@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { getDb } from "../lib/database";
-import type { AppSettings, VideoFormat, Resolution, LlmModel } from "../types";
+import type { AppSettings, VideoFormat, Resolution, LlmModel, WhisperModel } from "../types";
 
 const DEFAULTS: AppSettings = {
   anthropic_api_key: "",
@@ -15,6 +15,8 @@ const DEFAULTS: AppSettings = {
   analysis_model_override: "",
   evaluation_model_override: "",
   max_moments_per_analysis: 10,
+  whisper_model: "small.en",
+  auto_transcribe: false,
   theme: "dark",
   check_for_updates: true,
 };
@@ -34,7 +36,7 @@ function deserialize<K extends keyof AppSettings>(key: K, raw: string): AppSetti
   if (key === "max_concurrent_downloads" || key === "max_moments_per_analysis") {
     return Number(trimmed) as AppSettings[K];
   }
-  if (key === "check_for_updates") {
+  if (key === "check_for_updates" || key === "auto_transcribe") {
     return (trimmed === "true") as AppSettings[K];
   }
   return trimmed as AppSettings[K];
@@ -98,4 +100,4 @@ export async function getSettingFromDb<K extends keyof AppSettings>(
 }
 
 export { DEFAULTS as SETTING_DEFAULTS };
-export type { VideoFormat, Resolution, LlmModel };
+export type { VideoFormat, Resolution, LlmModel, WhisperModel };

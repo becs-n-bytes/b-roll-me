@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { SearchResult, EvaluatedClip, TranscriptMatch, TranscriptSegment, TranscriptLanguage } from "../types";
-import { listTranscriptLanguages, fetchTranscript } from "../lib/transcript";
+import { listTranscriptLanguages, fetchTranscript, transcribeWithWhisper } from "../lib/transcript";
+import { getWhisperStatus } from "../lib/whisper";
+import { getSettingFromDb } from "../stores/settingsStore";
 
 interface PreviewModalProps {
   result: SearchResult;
@@ -62,6 +64,9 @@ export default function PreviewModal({
   const [fullSegments, setFullSegments] = useState<TranscriptSegment[]>([]);
   const [showFullTranscript, setShowFullTranscript] = useState(false);
   const [transcriptStatus, setTranscriptStatus] = useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
+  const [whisperStatus, setWhisperStatus] = useState<"idle" | "running" | "no_model" | "error">("idle");
+  const [whisperStage, setWhisperStage] = useState("");
+  const [whisperError, setWhisperError] = useState("");
   const activeSegmentRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -110,6 +115,33 @@ export default function PreviewModal({
   const handleDownload = () => {
     onDownload(startTime, endTime);
     onClose();
+  };
+
+  const handleWhisperTranscribe = async () => {
+    try {
+      const modelName = await getSettingFromDb("whisper_model");
+      const status = await getWhisperStatus(modelName);
+      if (!status.downloaded) {
+        setWhisperStatus("no_model");
+        return;
+      }
+      setWhisperStatus("running");
+      setWhisperStage("downloading_audio");
+      const transcript = await transcribeWithWhisper(
+        result.video_id,
+        modelName,
+        (stage) => setWhisperStage(stage),
+      );
+      setFullSegments(transcript.segments);
+      setTranscriptLang(transcript.language);
+      setTranscriptGenerated(transcript.isGenerated);
+      setTranscriptStatus("loaded");
+      setShowFullTranscript(true);
+      setWhisperStatus("idle");
+    } catch (err) {
+      setWhisperStatus("error");
+      setWhisperError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   return (
@@ -331,7 +363,40 @@ export default function PreviewModal({
             <p className="text-xs text-neutral-500 text-center py-2">Loading transcript...</p>
           )}
           {transcriptStatus === "unavailable" && (
-            <p className="text-xs text-neutral-600 text-center py-2">No transcript available</p>
+            <div>
+              {whisperStatus === "idle" && (
+                <button
+                  onClick={handleWhisperTranscribe}
+                  className="w-full py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 transition-colors"
+                >
+                  Transcribe with Whisper
+                </button>
+              )}
+              {whisperStatus === "running" && (
+                <p className="text-xs text-neutral-400 text-center py-2">
+                  {whisperStage === "downloading_audio" && "Downloading audio..."}
+                  {whisperStage === "converting_audio" && "Converting audio..."}
+                  {whisperStage === "transcribing" && "Transcribing with Whisper... This may take a minute."}
+                  {!whisperStage && "Starting..."}
+                </p>
+              )}
+              {whisperStatus === "no_model" && (
+                <p className="text-xs text-amber-400 text-center py-2">
+                  Download a Whisper model in Settings to enable local transcription
+                </p>
+              )}
+              {whisperStatus === "error" && (
+                <div className="text-center py-2">
+                  <p className="text-xs text-red-400">{whisperError}</p>
+                  <button
+                    onClick={() => setWhisperStatus("idle")}
+                    className="text-xs text-neutral-500 mt-1 hover:text-neutral-300 transition-colors"
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {showFullTranscript && fullSegments.length > 0 && (
             <div>

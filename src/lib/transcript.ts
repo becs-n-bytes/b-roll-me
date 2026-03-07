@@ -1,6 +1,7 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import { getInnertube } from "./innertube";
 import { getDb } from "./database";
+import { transcribeVideo } from "./whisper";
 import type {
   TranscriptSegment,
   TranscriptMatch,
@@ -153,6 +154,23 @@ export async function fetchTranscript(
       [videoId, JSON.stringify(result), track.language_code ?? "en"],
     );
   }
+
+  return result;
+}
+
+export async function transcribeWithWhisper(
+  videoId: string,
+  modelName: string,
+  onProgress?: (stage: string, progress: number) => void,
+): Promise<FetchedTranscript> {
+  const json = await transcribeVideo(videoId, modelName, onProgress);
+  const result = JSON.parse(json) as FetchedTranscript;
+
+  const db = await getDb();
+  await db.execute(
+    "INSERT OR REPLACE INTO transcript_cache (video_id, transcript_json, language) VALUES ($1, $2, $3)",
+    [videoId, JSON.stringify(result), result.languageCode],
+  );
 
   return result;
 }
