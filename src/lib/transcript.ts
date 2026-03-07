@@ -1,7 +1,12 @@
 import { fetch } from "@tauri-apps/plugin-http";
 import { getInnertube } from "./innertube";
 import { getDb } from "./database";
-import type { TranscriptSegment, TranscriptMatch } from "../types";
+import type {
+  TranscriptSegment,
+  TranscriptMatch,
+  TranscriptLanguage,
+  FetchedTranscript,
+} from "../types";
 
 interface TimedTextEvent {
   segs?: { utf8: string }[];
@@ -13,41 +18,46 @@ interface TimedTextResponse {
   events?: TimedTextEvent[];
 }
 
-export async function fetchTranscript(videoId: string): Promise<TranscriptSegment[] | null> {
-  const db = await getDb();
-  const cached = await db.select<{ transcript_json: string }[]>(
-    "SELECT transcript_json FROM transcript_cache WHERE video_id = $1",
-    [videoId]
-  );
+interface CaptionTrack {
+  base_url: string;
+  language_code: string;
+  name?: { text?: string } | string;
+  kind?: string;
+  is_translatable?: boolean;
+}
 
-  if (cached.length > 0) {
-    return JSON.parse(cached[0].transcript_json);
+interface FetchTranscriptOptions {
+  language?: string;
+  translateTo?: string;
+}
+
+function getTrackName(track: CaptionTrack): string {
+  if (!track.name) return track.language_code;
+  if (typeof track.name === "string") return track.name;
+  return track.name.text ?? track.language_code;
+}
+
+function selectTrack(tracks: CaptionTrack[], language?: string): CaptionTrack | null {
+  if (language) {
+    const manual = tracks.find((t) => t.language_code === language && t.kind !== "asr");
+    if (manual) return manual;
+    const any = tracks.find((t) => t.language_code === language);
+    if (any) return any;
   }
 
-  const yt = await getInnertube();
-  const info = await yt.getBasicInfo(videoId, { client: "ANDROID" });
-  const tracks = info.captions?.caption_tracks;
-  if (!tracks?.length) return null;
-
-  const track =
+  return (
     tracks.find((t) => t.language_code === "en" && t.kind !== "asr") ??
     tracks.find((t) => t.language_code === "en") ??
-    tracks[0];
+    tracks.find((t) => t.kind !== "asr") ??
+    tracks[0] ??
+    null
+  );
+}
 
-  if (!track?.base_url) return null;
+function parseTimedText(data: TimedTextResponse): TranscriptSegment[] {
+  if (!data.events?.length) return [];
 
-  const captionUrl = new URL(track.base_url);
-  captionUrl.searchParams.set("fmt", "json3");
-
-  const response = await fetch(captionUrl.toString(), {
-    headers: { Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" },
-  });
-  if (!response.ok) return null;
-
-  const data = (await response.json()) as TimedTextResponse;
-  if (!data.events?.length) return null;
-
-  const segments: TranscriptSegment[] = data.events
+  return data.events
     .filter((e) => e.segs && e.tStartMs !== undefined)
     .map((e) => ({
       text: e.segs!.map((s) => s.utf8).join("").trim(),
@@ -55,20 +65,101 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
       duration: (e.dDurationMs ?? 0) / 1000,
     }))
     .filter((s) => s.text.length > 0);
+}
 
+async function getCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
+  const yt = await getInnertube();
+  const info = await yt.getBasicInfo(videoId, { client: "ANDROID" });
+  const tracks = info.captions?.caption_tracks;
+  if (!tracks?.length) return [];
+  return tracks as unknown as CaptionTrack[];
+}
+
+export async function listTranscriptLanguages(
+  videoId: string,
+): Promise<TranscriptLanguage[]> {
+  const tracks = await getCaptionTracks(videoId);
+  return tracks.map((t) => ({
+    code: t.language_code,
+    name: getTrackName(t),
+    isGenerated: t.kind === "asr",
+    isTranslatable: t.is_translatable ?? false,
+  }));
+}
+
+export async function fetchTranscript(
+  videoId: string,
+  options?: FetchTranscriptOptions,
+): Promise<FetchedTranscript | null> {
+  const db = await getDb();
+  const language = options?.language;
+  const translateTo = options?.translateTo;
+
+  if (!language && !translateTo) {
+    const cached = await db.select<{ transcript_json: string; language: string }[]>(
+      "SELECT transcript_json, language FROM transcript_cache WHERE video_id = $1",
+      [videoId],
+    );
+
+    if (cached.length > 0) {
+      const parsed = JSON.parse(cached[0].transcript_json);
+      if (Array.isArray(parsed)) {
+        return {
+          segments: parsed,
+          language: cached[0].language ?? "en",
+          languageCode: cached[0].language ?? "en",
+          isGenerated: false,
+        };
+      }
+      return parsed as FetchedTranscript;
+    }
+  }
+
+  const tracks = await getCaptionTracks(videoId);
+  if (tracks.length === 0) return null;
+
+  const track = selectTrack(tracks, language);
+  if (!track?.base_url) return null;
+
+  const captionUrl = new URL(track.base_url);
+  captionUrl.searchParams.set("fmt", "json3");
+  if (translateTo) {
+    captionUrl.searchParams.set("tlang", translateTo);
+  }
+
+  const response = await fetch(captionUrl.toString(), {
+    headers: { Origin: "https://www.youtube.com", Referer: "https://www.youtube.com/" },
+  });
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as TimedTextResponse;
+  const segments = parseTimedText(data);
   if (segments.length === 0) return null;
 
-  await db.execute(
-    "INSERT OR REPLACE INTO transcript_cache (video_id, transcript_json, language) VALUES ($1, $2, $3)",
-    [videoId, JSON.stringify(segments), track.language_code ?? "en"]
-  );
+  const isGenerated = track.kind === "asr";
+  const resolvedLanguage = translateTo ?? track.language_code;
+  const resolvedName = translateTo ? `${getTrackName(track)} → ${translateTo}` : getTrackName(track);
 
-  return segments;
+  const result: FetchedTranscript = {
+    segments,
+    language: resolvedName,
+    languageCode: resolvedLanguage,
+    isGenerated,
+  };
+
+  if (!translateTo) {
+    await db.execute(
+      "INSERT OR REPLACE INTO transcript_cache (video_id, transcript_json, language) VALUES ($1, $2, $3)",
+      [videoId, JSON.stringify(result), track.language_code ?? "en"],
+    );
+  }
+
+  return result;
 }
 
 export function searchTranscript(
   segments: TranscriptSegment[],
-  query: string
+  query: string,
 ): TranscriptMatch[] {
   const lowerQuery = query.toLowerCase();
   const words = lowerQuery.split(/\s+/).filter((w) => w.length > 2);

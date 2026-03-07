@@ -40,6 +40,20 @@ export interface TranscriptSegment {
   duration: number;
 }
 
+export interface TranscriptLanguage {
+  code: string;
+  name: string;
+  isGenerated: boolean;
+  isTranslatable: boolean;
+}
+
+export interface FetchedTranscript {
+  segments: TranscriptSegment[];
+  language: string;
+  languageCode: string;
+  isGenerated: boolean;
+}
+
 export interface TranscriptMatch {
   text: string;
   startTime: number;

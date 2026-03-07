@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import type { SearchResult, EvaluatedClip, TranscriptMatch } from "../types";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { SearchResult, EvaluatedClip, TranscriptMatch, TranscriptSegment, TranscriptLanguage } from "../types";
+import { listTranscriptLanguages, fetchTranscript } from "../lib/transcript";
 
 interface PreviewModalProps {
   result: SearchResult;
@@ -55,6 +56,34 @@ export default function PreviewModal({
   const [startTime, setStartTime] = useState(initialStart);
   const [endTime, setEndTime] = useState(initialEnd);
   const [embedKey, setEmbedKey] = useState(0);
+  const [languages, setLanguages] = useState<TranscriptLanguage[]>([]);
+  const [transcriptLang, setTranscriptLang] = useState<string>("");
+  const [transcriptGenerated, setTranscriptGenerated] = useState(false);
+  const [fullSegments, setFullSegments] = useState<TranscriptSegment[]>([]);
+  const [showFullTranscript, setShowFullTranscript] = useState(false);
+  const [transcriptStatus, setTranscriptStatus] = useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
+  const activeSegmentRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setTranscriptStatus("loading");
+    listTranscriptLanguages(result.video_id)
+      .then(setLanguages)
+      .catch(() => {});
+    fetchTranscript(result.video_id)
+      .then((t) => {
+        if (t && t.segments.length > 0) {
+          setTranscriptLang(t.language);
+          setTranscriptGenerated(t.isGenerated);
+          setFullSegments(t.segments);
+          setTranscriptStatus("loaded");
+        } else {
+          setTranscriptStatus("unavailable");
+        }
+      })
+      .catch(() => {
+        setTranscriptStatus("unavailable");
+      });
+  }, [result.video_id]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -221,6 +250,19 @@ export default function PreviewModal({
                 {transcriptMatches.length !== 1 ? "es" : ""}
               </span>
             )}
+            {transcriptLang && (
+              <span className="text-neutral-400">
+                {transcriptLang}
+                {transcriptGenerated && (
+                  <span className="ml-1 text-amber-500/70">(auto)</span>
+                )}
+              </span>
+            )}
+            {languages.length > 1 && (
+              <span className="text-neutral-600">
+                {languages.length} languages
+              </span>
+            )}
           </div>
           {evaluation && (
             <div className="mt-2 flex items-start gap-2">
@@ -247,6 +289,11 @@ export default function PreviewModal({
           <div className="px-4 pb-4">
             <h4 className="text-xs font-medium text-neutral-500 mb-2">
               Transcript Matches
+              {transcriptLang && (
+                <span className="ml-1.5 font-normal text-neutral-600">
+                  ({transcriptLang}{transcriptGenerated ? ", auto-generated" : ""})
+                </span>
+              )}
             </h4>
             <div className="flex flex-col gap-1.5">
               {transcriptMatches.map((m, i) => (
@@ -270,6 +317,68 @@ export default function PreviewModal({
             </div>
           </div>
         )}
+
+        <div className="px-4 pb-4">
+          {transcriptStatus === "loaded" && !showFullTranscript && (
+            <button
+              onClick={() => setShowFullTranscript(true)}
+              className="w-full py-2 rounded-lg text-xs font-medium text-neutral-400 hover:text-neutral-200 bg-neutral-800/50 hover:bg-neutral-800 border border-neutral-700/50 hover:border-neutral-600 transition-colors"
+            >
+              Show Full Transcript ({fullSegments.length} segments)
+            </button>
+          )}
+          {transcriptStatus === "loading" && (
+            <p className="text-xs text-neutral-500 text-center py-2">Loading transcript...</p>
+          )}
+          {transcriptStatus === "unavailable" && (
+            <p className="text-xs text-neutral-600 text-center py-2">No transcript available</p>
+          )}
+          {showFullTranscript && fullSegments.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-medium text-neutral-500">
+                  Full Transcript
+                  {transcriptLang && (
+                    <span className="ml-1.5 font-normal text-neutral-600">
+                      ({transcriptLang}{transcriptGenerated ? ", auto-generated" : ""})
+                    </span>
+                  )}
+                </h4>
+                <button
+                  onClick={() => setShowFullTranscript(false)}
+                  className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                >
+                  Hide
+                </button>
+              </div>
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950/50">
+                {fullSegments.map((seg, i) => {
+                  const isActive = seg.start >= startTime && seg.start < endTime;
+                  return (
+                    <button
+                      key={i}
+                      ref={isActive && !activeSegmentRef.current ? activeSegmentRef : undefined}
+                      onClick={() => {
+                        setStartTime(Math.floor(seg.start));
+                        setEndTime(Math.ceil(seg.start + seg.duration + 5));
+                      }}
+                      className={`w-full text-left px-3 py-1.5 flex gap-2 hover:bg-neutral-800/70 transition-colors border-b border-neutral-800/50 last:border-b-0 ${
+                        isActive ? "bg-blue-500/10" : ""
+                      }`}
+                    >
+                      <span className={`text-xs font-mono shrink-0 pt-0.5 ${isActive ? "text-blue-400" : "text-neutral-600"}`}>
+                        {formatDuration(Math.floor(seg.start))}
+                      </span>
+                      <span className={`text-xs leading-relaxed ${isActive ? "text-neutral-200" : "text-neutral-400"}`}>
+                        {seg.text}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center justify-between p-4 border-t border-neutral-800">
           <a

@@ -89,9 +89,9 @@ export const useSearchStore = create<SearchState>((set, get) => ({
 
       for (const result of saved) {
         try {
-          const segments = await fetchTranscript(result.video_id);
-          if (segments) {
-            const matches = queries.flatMap((q) => searchTranscript(segments, q));
+          const transcript = await fetchTranscript(result.video_id);
+          if (transcript) {
+            const matches = queries.flatMap((q) => searchTranscript(transcript.segments, q));
             if (matches.length > 0) {
               const uniqueMatches = matches.filter(
                 (m, i, arr) => arr.findIndex((a) => Math.abs(a.startTime - m.startTime) < 3) === i
@@ -158,10 +158,10 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   },
 
   fetchTranscriptMatches: async (resultId: string, videoId: string, queries: string[]) => {
-    const segments = await fetchTranscript(videoId);
-    if (!segments) return;
+    const transcript = await fetchTranscript(videoId);
+    if (!transcript) return;
 
-    const matches = queries.flatMap((q) => searchTranscript(segments, q));
+    const matches = queries.flatMap((q) => searchTranscript(transcript.segments, q));
     if (matches.length === 0) return;
 
     const uniqueMatches = matches.filter(

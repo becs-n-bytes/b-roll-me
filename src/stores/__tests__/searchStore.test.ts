@@ -141,7 +141,12 @@ describe("searchStore", () => {
       const segments: TranscriptSegment[] = [
         { text: "hello world", start: 10, duration: 5 },
       ];
-      mockFetchTranscript.mockResolvedValueOnce(segments);
+      mockFetchTranscript.mockResolvedValueOnce({
+        segments,
+        language: "en",
+        languageCode: "en",
+        isGenerated: false,
+      });
       mockSearchTranscript.mockReturnValueOnce([
         { text: "hello world", startTime: 10, endTime: 15 },
       ]);
@@ -233,7 +238,12 @@ describe("searchStore", () => {
       const segments: TranscriptSegment[] = [
         { text: "hello world", start: 10, duration: 5 },
       ];
-      mockFetchTranscript.mockResolvedValueOnce(segments);
+      mockFetchTranscript.mockResolvedValueOnce({
+        segments,
+        language: "en",
+        languageCode: "en",
+        isGenerated: false,
+      });
       mockSearchTranscript.mockReturnValueOnce([
         { text: "hello world", startTime: 10, endTime: 15 },
       ]);
@@ -257,9 +267,12 @@ describe("searchStore", () => {
     });
 
     it("does nothing when no transcript matches found", async () => {
-      mockFetchTranscript.mockResolvedValueOnce([
-        { text: "unrelated", start: 0, duration: 5 },
-      ]);
+      mockFetchTranscript.mockResolvedValueOnce({
+        segments: [{ text: "unrelated", start: 0, duration: 5 }],
+        language: "en",
+        languageCode: "en",
+        isGenerated: false,
+      });
       mockSearchTranscript.mockReturnValueOnce([]);
 
       await useSearchStore.getState().fetchTranscriptMatches("sr-1", "vid-1", ["q"]);

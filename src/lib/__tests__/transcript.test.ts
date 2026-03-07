@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fetchTranscript, searchTranscript } from "../transcript";
+import { fetchTranscript, searchTranscript, listTranscriptLanguages } from "../transcript";
 import type { TranscriptSegment } from "../../types";
 
 vi.mock("../innertube");
@@ -174,12 +174,24 @@ describe("fetchTranscript", () => {
     mockDb.execute.mockResolvedValue({ rowsAffected: 0 });
   });
 
-  it("returns cached transcript from DB if exists", async () => {
+  it("returns cached transcript from DB if exists (old array format)", async () => {
     const cached = [{ text: "hello", start: 0, duration: 5 }];
-    mockDb.select.mockResolvedValue([{ transcript_json: JSON.stringify(cached) }]);
+    mockDb.select.mockResolvedValue([{ transcript_json: JSON.stringify(cached), language: "en" }]);
+
+    const result = await fetchTranscript("abc123");
+    expect(result?.segments).toEqual(cached);
+    expect(result?.languageCode).toBe("en");
+    expect(result?.isGenerated).toBe(false);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns cached transcript from DB (new FetchedTranscript format)", async () => {
+    const cached = { segments: [{ text: "hello", start: 0, duration: 5 }], language: "English", languageCode: "en", isGenerated: true };
+    mockDb.select.mockResolvedValue([{ transcript_json: JSON.stringify(cached), language: "en" }]);
 
     const result = await fetchTranscript("abc123");
     expect(result).toEqual(cached);
+    expect(result?.isGenerated).toBe(true);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -191,7 +203,9 @@ describe("fetchTranscript", () => {
     ]));
 
     const result = await fetchTranscript("video1");
-    expect(result).toEqual([{ text: "hello world", start: 1, duration: 5 }]);
+    expect(result?.segments).toEqual([{ text: "hello world", start: 1, duration: 5 }]);
+    expect(result?.languageCode).toBe("en");
+    expect(result?.isGenerated).toBe(false);
     expect(yt.getBasicInfo).toHaveBeenCalledWith("video1", { client: "ANDROID" });
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
@@ -205,7 +219,7 @@ describe("fetchTranscript", () => {
     ]));
 
     const result = await fetchTranscript("vid2");
-    expect(result).toEqual([
+    expect(result?.segments).toEqual([
       { text: "first part", start: 0, duration: 3 },
       { text: "second", start: 3, duration: 2 },
     ]);
@@ -320,7 +334,7 @@ describe("fetchTranscript", () => {
     ]));
 
     const result = await fetchTranscript("mixed");
-    expect(result).toEqual([{ text: "valid", start: 2, duration: 1 }]);
+    expect(result?.segments).toEqual([{ text: "valid", start: 2, duration: 1 }]);
   });
 
   it("filters out events without segs", async () => {
@@ -332,7 +346,7 @@ describe("fetchTranscript", () => {
     ]));
 
     const result = await fetchTranscript("nosegs");
-    expect(result).toEqual([{ text: "has segs", start: 1, duration: 1 }]);
+    expect(result?.segments).toEqual([{ text: "has segs", start: 1, duration: 1 }]);
   });
 
   it("returns null when all segments have empty text after filtering", async () => {
@@ -373,5 +387,130 @@ describe("fetchTranscript", () => {
     expect(captionUrlArg).not.toContain("fmt=srv3");
     const fmtCount = (captionUrlArg.match(/fmt=/g) ?? []).length;
     expect(fmtCount).toBe(1);
+  });
+
+  it("returns isGenerated true for ASR tracks", async () => {
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en", kind: "asr" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "auto text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    const result = await fetchTranscript("asrvid");
+    expect(result?.isGenerated).toBe(true);
+  });
+
+  it("selects specific language when requested", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/en", language_code: "en" },
+      { base_url: "https://example.com/es", language_code: "es" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "hola" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    const result = await fetchTranscript("langvid", { language: "es" });
+    const captionUrl = mockFetch.mock.calls[0][0] as string;
+    expect(captionUrl).toContain("example.com/es");
+    expect(result?.languageCode).toBe("es");
+  });
+
+  it("appends tlang param for translation", async () => {
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "translated" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    const result = await fetchTranscript("tlangvid", { translateTo: "de" });
+    const captionUrl = mockFetch.mock.calls[0][0] as string;
+    expect(captionUrl).toContain("tlang=de");
+    expect(result?.languageCode).toBe("de");
+  });
+
+  it("does not cache translation results", async () => {
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "en" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "text" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    await fetchTranscript("nocachevid", { translateTo: "fr" });
+    expect(mockDb.execute).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT OR REPLACE"),
+      expect.anything(),
+    );
+  });
+
+  it("bypasses cache when language is specified", async () => {
+    mockDb.select.mockResolvedValue([{ transcript_json: JSON.stringify([]), language: "en" }]);
+    const yt = makeMockInnertube([{ base_url: CAPTION_BASE_URL, language_code: "es" }]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "hola" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    const result = await fetchTranscript("bypassvid", { language: "es" });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result?.segments[0].text).toBe("hola");
+  });
+
+  it("falls back to any manual track before ASR when no English", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/asr-fr", language_code: "fr", kind: "asr" },
+      { base_url: "https://example.com/manual-de", language_code: "de" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+    mockFetch.mockResolvedValueOnce(makeCaptionResponse([
+      { segs: [{ utf8: "manuell" }], tStartMs: 0, dDurationMs: 1000 },
+    ]));
+
+    await fetchTranscript("fallbackvid");
+    const captionUrl = mockFetch.mock.calls[0][0] as string;
+    expect(captionUrl).toContain("example.com/manual-de");
+  });
+});
+
+describe("listTranscriptLanguages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns available languages with metadata", async () => {
+    const yt = makeMockInnertube([
+      { base_url: "https://example.com/en", language_code: "en", kind: undefined },
+      { base_url: "https://example.com/es", language_code: "es", kind: "asr" },
+    ]);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const langs = await listTranscriptLanguages("testvid");
+    expect(langs).toHaveLength(2);
+    expect(langs[0]).toEqual({ code: "en", name: "en", isGenerated: false, isTranslatable: false });
+    expect(langs[1]).toEqual({ code: "es", name: "es", isGenerated: true, isTranslatable: false });
+  });
+
+  it("returns empty array when no tracks", async () => {
+    const yt = makeMockInnertube(null);
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const langs = await listTranscriptLanguages("novid");
+    expect(langs).toEqual([]);
+  });
+
+  it("includes isTranslatable flag from track", async () => {
+    const yt = {
+      getBasicInfo: vi.fn().mockResolvedValue({
+        captions: {
+          caption_tracks: [
+            { base_url: "https://example.com/en", language_code: "en", is_translatable: true },
+          ],
+        },
+      }),
+    };
+    mockGetInnertube.mockResolvedValue(yt as never);
+
+    const langs = await listTranscriptLanguages("transvid");
+    expect(langs[0].isTranslatable).toBe(true);
   });
 });
